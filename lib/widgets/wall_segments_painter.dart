@@ -1,0 +1,407 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../models/graph_point.dart';
+import '../models/wall_segment.dart';
+
+class WallSegmentsPainter extends CustomPainter {
+  const WallSegmentsPainter({
+    required this.segments,
+    required this.selectedSegmentIndex,
+    required this.activeWallStart,
+    required this.previewSegment,
+    this.drawMeasurements = true,
+    this.hiddenSegmentIndexes = const <int>{},
+  });
+
+  final List<WallSegment> segments;
+  final int? selectedSegmentIndex;
+  final GraphPoint? activeWallStart;
+  final WallSegment? previewSegment;
+  final bool drawMeasurements;
+  final Set<int> hiddenSegmentIndexes;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final wallOutlinePaint = Paint()
+      ..color = Colors.white
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 9;
+    for (var i = 0; i < segments.length; i += 1) {
+      if (hiddenSegmentIndexes.contains(i)) {
+        continue;
+      }
+
+      final segment = segments[i];
+      final curvePath = _pathForSegment(segment);
+      final wallPaint = Paint()
+        ..color = segment.color
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..strokeWidth = segment.strokeWidth;
+
+      canvas.drawPath(curvePath, wallOutlinePaint);
+      _drawPatternedPath(canvas, curvePath, segment, wallPaint);
+      if (segment.hasArrow) {
+        _drawArrowHead(canvas, segment, wallPaint);
+      }
+
+      if (i == selectedSegmentIndex) {
+        _drawSelectedSegment(canvas, segment);
+      }
+    }
+
+    for (var i = 0; i < segments.length; i += 1) {
+      if (hiddenSegmentIndexes.contains(i)) {
+        continue;
+      }
+
+      final segment = segments[i];
+      _drawEndpoint(canvas, segment.start, const Color(0xFF214D38));
+      _drawEndpoint(canvas, segment.end, const Color(0xFF214D38));
+      if (drawMeasurements) {
+        _drawMeasurementLabel(canvas, segment);
+      }
+    }
+
+    final activePoint = activeWallStart;
+    if (activePoint != null) {
+      _drawEndpoint(canvas, activePoint, const Color(0xFFBC8A3D), radius: 8);
+      _drawActiveStartLabel(canvas, activePoint);
+    }
+
+    final preview = previewSegment;
+    if (preview != null) {
+      _drawPreviewSegment(canvas, preview);
+    }
+  }
+
+  void _drawSelectedSegment(Canvas canvas, WallSegment segment) {
+    final selectedPaint = Paint()
+      ..color = const Color(0xFF2F80ED)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    canvas.drawPath(_pathForSegment(segment), selectedPaint);
+    _drawSelectionHandle(canvas, segment.start.offset);
+    _drawSelectionHandle(canvas, segment.end.offset);
+
+    final controlPoint = segment.controlPoint;
+    if (controlPoint != null) {
+      _drawSelectionHandle(canvas, controlPoint.offset);
+    }
+  }
+
+  void _drawPatternedPath(
+    Canvas canvas,
+    Path path,
+    WallSegment segment,
+    Paint paint,
+  ) {
+    switch (segment.pattern) {
+      case LinePattern.solid:
+        canvas.drawPath(path, paint);
+        return;
+      case LinePattern.dashed:
+        _drawDashedLine(canvas, segment, paint, dash: 24, gap: 14);
+        return;
+      case LinePattern.dottedSmall:
+        _drawDottedLine(canvas, segment, paint, radius: 2.5, gap: 13);
+        return;
+      case LinePattern.dottedLarge:
+        _drawDottedLine(canvas, segment, paint, radius: 4.5, gap: 18);
+        return;
+      case LinePattern.xMarks:
+        _drawSymbolLine(canvas, segment, paint, symbol: _LineSymbol.x);
+        return;
+      case LinePattern.diamonds:
+        _drawSymbolLine(canvas, segment, paint, symbol: _LineSymbol.diamond);
+        return;
+    }
+  }
+
+  void _drawDashedLine(
+    Canvas canvas,
+    WallSegment segment,
+    Paint paint, {
+    required double dash,
+    required double gap,
+  }) {
+    final start = segment.start.offset;
+    final end = segment.end.offset;
+    final vector = end - start;
+    final length = vector.distance;
+    if (length == 0 || segment.isCurve) {
+      canvas.drawPath(_pathForSegment(segment), paint);
+      return;
+    }
+
+    final direction = vector / length;
+    var current = 0.0;
+    while (current < length) {
+      final dashEnd = math.min(current + dash, length);
+      canvas.drawLine(
+        start + (direction * current),
+        start + (direction * dashEnd),
+        paint,
+      );
+      current += dash + gap;
+    }
+  }
+
+  void _drawDottedLine(
+    Canvas canvas,
+    WallSegment segment,
+    Paint paint, {
+    required double radius,
+    required double gap,
+  }) {
+    final start = segment.start.offset;
+    final end = segment.end.offset;
+    final vector = end - start;
+    final length = vector.distance;
+    if (length == 0 || segment.isCurve) {
+      canvas.drawPath(_pathForSegment(segment), paint);
+      return;
+    }
+
+    final direction = vector / length;
+    for (var current = 0.0; current <= length; current += gap) {
+      canvas.drawCircle(start + (direction * current), radius, paint);
+    }
+  }
+
+  void _drawSymbolLine(
+    Canvas canvas,
+    WallSegment segment,
+    Paint paint, {
+    required _LineSymbol symbol,
+  }) {
+    final start = segment.start.offset;
+    final end = segment.end.offset;
+    final vector = end - start;
+    final length = vector.distance;
+    if (length == 0 || segment.isCurve) {
+      canvas.drawPath(_pathForSegment(segment), paint);
+      return;
+    }
+
+    final direction = vector / length;
+    final normal = Offset(-direction.dy, direction.dx);
+    for (var current = 12.0; current < length; current += 26) {
+      final center = start + (direction * current);
+      if (symbol == _LineSymbol.x) {
+        canvas.drawLine(
+          center - (direction * 6) - (normal * 6),
+          center + (direction * 6) + (normal * 6),
+          paint,
+        );
+        canvas.drawLine(
+          center - (direction * 6) + (normal * 6),
+          center + (direction * 6) - (normal * 6),
+          paint,
+        );
+      } else {
+        final path = Path()
+          ..moveTo((center - (direction * 7)).dx, (center - (direction * 7)).dy)
+          ..lineTo((center + (normal * 6)).dx, (center + (normal * 6)).dy)
+          ..lineTo((center + (direction * 7)).dx, (center + (direction * 7)).dy)
+          ..lineTo((center - (normal * 6)).dx, (center - (normal * 6)).dy)
+          ..close();
+        canvas.drawPath(path, paint);
+      }
+    }
+  }
+
+  void _drawArrowHead(Canvas canvas, WallSegment segment, Paint paint) {
+    final end = segment.end.offset;
+    final start = segment.controlPoint?.offset ?? segment.start.offset;
+    final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
+    const size = 18.0;
+    final path = Path()
+      ..moveTo(end.dx, end.dy)
+      ..lineTo(
+        end.dx - (math.cos(angle - math.pi / 6) * size),
+        end.dy - (math.sin(angle - math.pi / 6) * size),
+      )
+      ..lineTo(
+        end.dx - (math.cos(angle + math.pi / 6) * size),
+        end.dy - (math.sin(angle + math.pi / 6) * size),
+      )
+      ..close();
+    canvas.drawPath(path, paint..style = PaintingStyle.fill);
+    paint.style = PaintingStyle.stroke;
+  }
+
+  void _drawPreviewSegment(Canvas canvas, WallSegment segment) {
+    final previewPaint = Paint()
+      ..color = segment.color.withValues(alpha: 0.72)
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = segment.strokeWidth;
+    final endpointPaint = Paint()
+      ..color = segment.color.withValues(alpha: 0.86);
+
+    canvas.drawPath(_pathForSegment(segment), previewPaint);
+    if (segment.hasArrow) {
+      _drawArrowHead(canvas, segment, previewPaint);
+    }
+    canvas.drawCircle(segment.end.offset, 5, endpointPaint);
+  }
+
+  void _drawSelectionHandle(Canvas canvas, Offset center) {
+    final rect = Rect.fromCenter(center: center, width: 12, height: 12);
+
+    canvas.drawRect(rect, Paint()..color = Colors.white);
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..color = const Color(0xFF2F80ED)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+  }
+
+  Path _pathForSegment(WallSegment segment) {
+    final path = Path()..moveTo(segment.start.x, segment.start.y);
+    final controlPoint = segment.controlPoint;
+
+    if (controlPoint == null) {
+      path.lineTo(segment.end.x, segment.end.y);
+    } else {
+      path.quadraticBezierTo(
+        controlPoint.x,
+        controlPoint.y,
+        segment.end.x,
+        segment.end.y,
+      );
+    }
+
+    return path;
+  }
+
+  void _drawEndpoint(
+    Canvas canvas,
+    GraphPoint point,
+    Color color, {
+    double radius = 6,
+  }) {
+    final fillPaint = Paint()..color = Colors.white;
+    final borderPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+
+    canvas.drawCircle(point.offset, radius, fillPaint);
+    canvas.drawCircle(point.offset, radius, borderPaint);
+  }
+
+  void _drawMeasurementLabel(Canvas canvas, WallSegment segment) {
+    final start = segment.start.offset;
+    final end = segment.end.offset;
+    final dx = end.dx - start.dx;
+    final dy = end.dy - start.dy;
+    final length = math.sqrt((dx * dx) + (dy * dy));
+
+    if (length == 0) {
+      return;
+    }
+
+    final midpoint = Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
+    final perpendicular = Offset(-dy / length, dx / length);
+    final labelCenter = midpoint + (perpendicular * 18);
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: segment.measurementLabel,
+        style: const TextStyle(
+          color: Color(0xFF1C2B22),
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final labelRect = Rect.fromCenter(
+      center: labelCenter,
+      width: textPainter.width + 16,
+      height: textPainter.height + 8,
+    );
+    final labelRRect = RRect.fromRectAndRadius(
+      labelRect,
+      const Radius.circular(5),
+    );
+    final labelBackgroundPaint = Paint()..color = Colors.white;
+    final labelBorderPaint = Paint()
+      ..color = const Color(0xFFD1CCBF)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+
+    canvas.drawRRect(labelRRect, labelBackgroundPaint);
+    canvas.drawRRect(labelRRect, labelBorderPaint);
+    textPainter.paint(
+      canvas,
+      Offset(
+        labelCenter.dx - (textPainter.width / 2),
+        labelCenter.dy - (textPainter.height / 2),
+      ),
+    );
+  }
+
+  void _drawActiveStartLabel(Canvas canvas, GraphPoint point) {
+    final textPainter = TextPainter(
+      text: const TextSpan(
+        text: 'Start',
+        style: TextStyle(
+          color: Color(0xFF1C2B22),
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final center = point.offset + const Offset(0, -24);
+    final labelRect = Rect.fromCenter(
+      center: center,
+      width: textPainter.width + 14,
+      height: textPainter.height + 8,
+    );
+    final labelRRect = RRect.fromRectAndRadius(
+      labelRect,
+      const Radius.circular(5),
+    );
+
+    canvas.drawRRect(labelRRect, Paint()..color = const Color(0xFFFFF2B8));
+    canvas.drawRRect(
+      labelRRect,
+      Paint()
+        ..color = const Color(0xFFC7A93C)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+    textPainter.paint(
+      canvas,
+      Offset(
+        center.dx - (textPainter.width / 2),
+        center.dy - (textPainter.height / 2),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant WallSegmentsPainter oldDelegate) {
+    return oldDelegate.segments != segments ||
+        oldDelegate.selectedSegmentIndex != selectedSegmentIndex ||
+        oldDelegate.activeWallStart != activeWallStart ||
+        oldDelegate.previewSegment != previewSegment ||
+        oldDelegate.drawMeasurements != drawMeasurements ||
+        oldDelegate.hiddenSegmentIndexes != hiddenSegmentIndexes;
+  }
+}
+
+enum _LineSymbol {
+  x,
+  diamond,
+}

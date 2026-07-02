@@ -1,0 +1,65 @@
+# Dart / Flutter
+.dart_tool/
+.dart-local/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Flutter build artifacts
+app.*.symbols
+app.*.map.json
+
+# Android local/generated files
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/local.properties
+*.jks
+*.keystore
+key.properties
+
+# iOS local/generated files
+ios/.symlinks/
+ios/Flutter/ephemeral/
+ios/Pods/
+ios/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+ios/Runner.xcodeproj/xcuserdata/
+ios/Runner.xcworkspace/xcuserdata/
+
+# macOS local/generated files
+macos/.symlinks/
+macos/Flutter/ephemeral/
+macos/Pods/
+macos/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+macos/Runner.xcodeproj/xcuserdata/
+macos/Runner.xcworkspace/xcuserdata/
+
+# Linux / Windows generated files
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# IDE and local machine files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+.history/
+
+# Secrets and environment overrides
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
