@@ -65,6 +65,8 @@ class CanvasToolbar extends StatelessWidget {
                 CanvasTool.pan,
                 CanvasTool.wall,
                 CanvasTool.arrow,
+                CanvasTool.curve,
+                CanvasTool.freehand,
               ]) ...[
                 _ToolButton(
                   icon: tool.icon,
@@ -80,17 +82,6 @@ class CanvasToolbar extends StatelessWidget {
                   preset: preset,
                   selected: selectedDrawingPreset == preset,
                   onPressed: () => onDrawingPresetSelected(preset),
-                ),
-                const SizedBox(height: 8),
-              ],
-              const Divider(height: 18),
-              const _ToolbarGroupLabel(label: 'Markers'),
-              for (final markerType in _fieldMarkerTypes) ...[
-                _MarkerToolButton(
-                  markerType: markerType,
-                  selected: selectedTool == CanvasTool.marker &&
-                      selectedMarkerType == markerType,
-                  onPressed: () => onMarkerSelected(markerType),
                 ),
                 const SizedBox(height: 8),
               ],
@@ -113,11 +104,32 @@ class CanvasToolbar extends StatelessWidget {
                 const SizedBox(height: 8),
               ],
               const Divider(height: 18),
-              const _ToolbarGroupLabel(label: 'Reviewing'),
+              const _ToolbarGroupLabel(label: 'Inspection\nMarkers'),
+              for (final markerType in _inspectionMarkerTypes) ...[
+                _MarkerToolButton(
+                  markerType: markerType,
+                  selected: selectedTool == CanvasTool.marker &&
+                      selectedMarkerType == markerType,
+                  onPressed: () => onMarkerSelected(markerType),
+                ),
+                const SizedBox(height: 8),
+              ],
+              const Divider(height: 18),
+              const _ToolbarGroupLabel(label: 'Treatment\nMarkers'),
+              for (final markerType in _treatmentMarkerTypes) ...[
+                _MarkerToolButton(
+                  markerType: markerType,
+                  selected: selectedTool == CanvasTool.marker &&
+                      selectedMarkerType == markerType,
+                  onPressed: () => onMarkerSelected(markerType),
+                ),
+                const SizedBox(height: 8),
+              ],
+              const Divider(height: 18),
+              const _ToolbarGroupLabel(label: 'Review'),
               for (final tool in const [
                 CanvasTool.text,
                 CanvasTool.photo,
-                CanvasTool.freehand,
               ]) ...[
                 _ToolButton(
                   icon: tool.icon,
@@ -129,9 +141,8 @@ class CanvasToolbar extends StatelessWidget {
                 const SizedBox(height: 8),
               ],
               for (final markerType in const [
-                GraphMarkerType.treatmentNote,
-                GraphMarkerType.moisture,
-                GraphMarkerType.termiteDamage,
+                GraphMarkerType.notePoint,
+                GraphMarkerType.photoPoint,
                 GraphMarkerType.recommendationPoint,
               ]) ...[
                 _MarkerToolButton(
@@ -158,15 +169,13 @@ class CanvasToolbar extends StatelessWidget {
   }
 }
 
-const List<GraphMarkerType> _fieldMarkerTypes = [
+const List<GraphMarkerType> _inspectionMarkerTypes = [
   GraphMarkerType.termiteActivity,
   GraphMarkerType.activeTermites,
   GraphMarkerType.termiteDamage,
   GraphMarkerType.moisture,
   GraphMarkerType.standingWater,
   GraphMarkerType.conduciveCondition,
-  GraphMarkerType.treatmentArea,
-  GraphMarkerType.baitStation,
   GraphMarkerType.crawlspaceIssue,
   GraphMarkerType.plumbingLeak,
   GraphMarkerType.hvacCondensation,
@@ -176,15 +185,21 @@ const List<GraphMarkerType> _fieldMarkerTypes = [
   GraphMarkerType.entryPoint,
   GraphMarkerType.rodentActivity,
   GraphMarkerType.generalPestActivity,
-  GraphMarkerType.photoPoint,
-  GraphMarkerType.notePoint,
-  GraphMarkerType.recommendationPoint,
   GraphMarkerType.oldDamage,
   GraphMarkerType.oldTermiteActivity,
   GraphMarkerType.damage,
   GraphMarkerType.woodFungi,
   GraphMarkerType.oldHouseBorers,
   GraphMarkerType.powderPostBeetles,
+];
+
+const List<GraphMarkerType> _treatmentMarkerTypes = [
+  GraphMarkerType.treatmentArea,
+  GraphMarkerType.baitStation,
+  GraphMarkerType.treatmentNote,
+  GraphMarkerType.circle,
+  GraphMarkerType.triangle,
+  GraphMarkerType.square,
 ];
 
 class _DrawingPresetButton extends StatelessWidget {

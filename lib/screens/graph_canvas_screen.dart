@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/graph_annotation.dart';
+import '../models/graph_document.dart';
 import '../models/freehand_stroke.dart';
 import '../models/graph_point.dart';
 import '../models/graph_shape.dart';
@@ -44,13 +45,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   final FocusNode _editorFocusNode = FocusNode(debugLabel: 'Graph editor');
   final TransformationController _transformationController =
       TransformationController();
+  late final GraphDocument _document;
   CanvasTool _selectedTool = CanvasTool.select;
-  bool _traceLayerVisible = false;
-  List<WallSegment> _wallSegments = <WallSegment>[];
-  List<GraphAnnotation> _annotations = <GraphAnnotation>[];
-  List<GraphShape> _shapes = <GraphShape>[];
-  List<FreehandStroke> _freehandStrokes = <FreehandStroke>[];
   final List<_UndoEntry> _undoStack = <_UndoEntry>[];
+  final List<_RedoEntry> _redoStack = <_RedoEntry>[];
+  bool _applyingHistory = false;
   GraphPoint? _activeWallStart;
   GraphPoint? _activePathStartPoint;
   GraphPoint? _pendingCurveControlPoint;
@@ -112,17 +111,48 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   Color _defaultFreehandColor = const Color(0xFF214D38);
   double _defaultFreehandWidth = 4;
   double _defaultFreehandOpacity = 0.95;
-  final Map<_GraphLayer, _LayerSettings> _layerSettings =
-      <_GraphLayer, _LayerSettings>{
-    _GraphLayer.structure: const _LayerSettings(),
-    _GraphLayer.shapes: const _LayerSettings(),
-    _GraphLayer.findings: const _LayerSettings(),
-    _GraphLayer.photos: const _LayerSettings(),
-    _GraphLayer.trace: const _LayerSettings(visible: false),
-  };
+  List<WallSegment> get _wallSegments => _document.wallSegments;
+  set _wallSegments(List<WallSegment> value) =>
+      _document.replaceWallSegments(value);
+
+  List<GraphAnnotation> get _annotations => _document.annotations;
+  set _annotations(List<GraphAnnotation> value) =>
+      _document.replaceAnnotations(value);
+
+  List<GraphShape> get _shapes => _document.shapes;
+  set _shapes(List<GraphShape> value) => _document.replaceShapes(value);
+
+  List<FreehandStroke> get _freehandStrokes => _document.freehandStrokes;
+  set _freehandStrokes(List<FreehandStroke> value) =>
+      _document.replaceFreehandStrokes(value);
+
+  bool get _traceLayerVisible => _document.layer('trace').visible;
+
+  Map<_GraphLayer, _LayerSettings> get _layerSettings => {
+        for (final layer in _GraphLayer.values)
+          layer: _LayerSettings(
+            visible: _document.layer(layer.name).visible,
+            locked: _document.layer(layer.name).locked,
+          ),
+      };
+
+  @override
+  void initState() {
+    super.initState();
+    _document = GraphDocument.forJob(widget.job);
+    _document.addListener(_handleDocumentChanged);
+  }
+
+  void _handleDocumentChanged() {
+    if (!_applyingHistory && _document.isDirty && _redoStack.isNotEmpty) {
+      _redoStack.clear();
+    }
+  }
 
   @override
   void dispose() {
+    _document.removeListener(_handleDocumentChanged);
+    _document.dispose();
     _editorFocusNode.dispose();
     _transformationController.dispose();
     super.dispose();
@@ -2784,7 +2814,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     final undoEntry = _undoStack.removeLast();
+    final redoEntry = _RedoEntry(
+      snapshot: _EditorSnapshot.capture(this),
+      undoEntry: undoEntry,
+    );
 
+    _applyingHistory = true;
     setState(() {
       switch (undoEntry.kind) {
         case _UndoKind.wallStart:
@@ -2815,6 +2850,24 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           break;
       }
     });
+    _applyingHistory = false;
+    _redoStack.add(redoEntry);
+  }
+
+  void _redoLastAction() {
+    if (_redoStack.isEmpty) {
+      _showCanvasMessage('Nothing to redo');
+      return;
+    }
+
+    final redoEntry = _redoStack.removeLast();
+    _applyingHistory = true;
+    setState(() {
+      redoEntry.snapshot.restore(this);
+      _undoStack.add(redoEntry.undoEntry);
+      _canvasStatus = 'Action restored';
+    });
+    _applyingHistory = false;
   }
 
   void _undoWallSegment() {
@@ -3155,7 +3208,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     final layer = _layerForSelection(currentSelection);
     setState(() {
       final current = _layerSettings[layer] ?? const _LayerSettings();
-      _layerSettings[layer] = current.copyWith(locked: locked);
+      _setLayerSettings(layer, current.copyWith(locked: locked));
       _canvasStatus =
           '${_layerLabel(layer)} layer ${locked ? 'locked' : 'unlocked'}';
     });
@@ -3315,13 +3368,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   void _toggleTraceLayer() {
     setState(() {
-      _traceLayerVisible = !_traceLayerVisible;
       final traceSettings =
           _layerSettings[_GraphLayer.trace] ?? const _LayerSettings();
-      _layerSettings[_GraphLayer.trace] = traceSettings.copyWith(
-        visible: _traceLayerVisible,
+      final nextVisible = !traceSettings.visible;
+      _setLayerSettings(
+        _GraphLayer.trace,
+        traceSettings.copyWith(visible: nextVisible),
       );
-      _canvasStatus = _traceLayerVisible ? 'Trace layer on' : 'Trace layer off';
+      _canvasStatus = nextVisible ? 'Trace layer on' : 'Trace layer off';
     });
   }
 
@@ -3334,7 +3388,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     setState(() {
       final current = _layerSettings[layer] ?? const _LayerSettings();
       final nextVisible = !current.visible;
-      _layerSettings[layer] = current.copyWith(visible: nextVisible);
+      _setLayerSettings(layer, current.copyWith(visible: nextVisible));
 
       final selection = _selection;
       if (!nextVisible &&
@@ -3352,10 +3406,25 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     setState(() {
       final current = _layerSettings[layer] ?? const _LayerSettings();
       final nextLocked = !current.locked;
-      _layerSettings[layer] = current.copyWith(locked: nextLocked);
+      _setLayerSettings(layer, current.copyWith(locked: nextLocked));
       _canvasStatus =
           '${_layerLabel(layer)} layer ${nextLocked ? 'locked' : 'unlocked'}';
     });
+  }
+
+  void _setLayerSettings(_GraphLayer layer, _LayerSettings settings) {
+    _document.setLayer(
+      layer.name,
+      GraphLayerState(visible: settings.visible, locked: settings.locked),
+    );
+  }
+
+  void _saveDocument() {
+    setState(() {
+      _document.markClean();
+      _canvasStatus = 'All changes saved';
+    });
+    _showCanvasMessage('Graph saved');
   }
 
   void _togglePropertiesCollapsed() {
@@ -4038,7 +4107,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 40,
-        title: Text(widget.job.customerName),
+        title: Text(
+          _document.isDirty
+              ? '${_document.customer.name} • Unsaved'
+              : _document.customer.name,
+        ),
       ),
       body: KeyboardListener(
         focusNode: _editorFocusNode,
@@ -4047,7 +4120,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              _JobSummary(job: widget.job),
               Expanded(
                 child: Stack(
                   children: [
@@ -4124,10 +4196,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                         message: _canvasStatus,
                         child: _TopEditorToolbar(
                           onUndo: _undoLastAction,
-                          onRedo: () => _showActionMessage('Redo'),
+                          onRedo: _redoLastAction,
                           onFinish: _finishWallPath,
                           onClear: _confirmClearGraph,
-                          onSave: () => _showActionMessage('Save'),
+                          onSave: _saveDocument,
                           onExport: () => _showActionMessage('Export'),
                           onUpload: () => _showActionMessage('Upload'),
                           onZoomIn: () => _zoomBy(1.2),
@@ -5583,67 +5655,6 @@ class _LayerRow extends StatelessWidget {
   }
 }
 
-class _JobSummary extends StatelessWidget {
-  const _JobSummary({required this.job});
-
-  final Job job;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 5, 12, 5),
-      color: Theme.of(context).colorScheme.surface,
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: Text(
-              job.serviceAddress,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-          ),
-          _SummaryPill(label: 'PestPac ${job.pestPacAccountNumber}'),
-          _SummaryPill(label: job.serviceType),
-        ],
-      ),
-    );
-  }
-}
-
-class _SummaryPill extends StatelessWidget {
-  const _SummaryPill({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFE3E0D8)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-        ),
-      ),
-    );
-  }
-}
-
 class _CanvasSurface extends StatelessWidget {
   const _CanvasSurface({
     required this.canvasSize,
@@ -6051,6 +6062,59 @@ class _Selection {
   int? get shapeIndex => kind == _SelectionKind.shape ? index : null;
 
   int? get freehandIndex => kind == _SelectionKind.freehand ? index : null;
+}
+
+class _EditorSnapshot {
+  const _EditorSnapshot({
+    required this.wallSegments,
+    required this.annotations,
+    required this.shapes,
+    required this.freehandStrokes,
+    required this.activeWallStart,
+    required this.activePathStartPoint,
+    required this.pendingCurveControlPoint,
+    required this.activePathStartSegmentIndex,
+  });
+
+  factory _EditorSnapshot.capture(_GraphCanvasScreenState state) =>
+      _EditorSnapshot(
+        wallSegments: List<WallSegment>.of(state._wallSegments),
+        annotations: List<GraphAnnotation>.of(state._annotations),
+        shapes: List<GraphShape>.of(state._shapes),
+        freehandStrokes: List<FreehandStroke>.of(state._freehandStrokes),
+        activeWallStart: state._activeWallStart,
+        activePathStartPoint: state._activePathStartPoint,
+        pendingCurveControlPoint: state._pendingCurveControlPoint,
+        activePathStartSegmentIndex: state._activePathStartSegmentIndex,
+      );
+
+  final List<WallSegment> wallSegments;
+  final List<GraphAnnotation> annotations;
+  final List<GraphShape> shapes;
+  final List<FreehandStroke> freehandStrokes;
+  final GraphPoint? activeWallStart;
+  final GraphPoint? activePathStartPoint;
+  final GraphPoint? pendingCurveControlPoint;
+  final int? activePathStartSegmentIndex;
+
+  void restore(_GraphCanvasScreenState state) {
+    state._wallSegments = wallSegments;
+    state._annotations = annotations;
+    state._shapes = shapes;
+    state._freehandStrokes = freehandStrokes;
+    state._activeWallStart = activeWallStart;
+    state._activePathStartPoint = activePathStartPoint;
+    state._pendingCurveControlPoint = pendingCurveControlPoint;
+    state._activePathStartSegmentIndex = activePathStartSegmentIndex;
+    state._previewSegment = null;
+  }
+}
+
+class _RedoEntry {
+  const _RedoEntry({required this.snapshot, required this.undoEntry});
+
+  final _EditorSnapshot snapshot;
+  final _UndoEntry undoEntry;
 }
 
 class _UndoEntry {

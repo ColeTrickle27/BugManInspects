@@ -1,0 +1,123 @@
+import 'package:bugman_graphs/models/freehand_stroke.dart';
+import 'package:bugman_graphs/models/graph_annotation.dart';
+import 'package:bugman_graphs/models/graph_document.dart';
+import 'package:bugman_graphs/models/graph_point.dart';
+import 'package:bugman_graphs/models/graph_shape.dart';
+import 'package:bugman_graphs/models/job.dart';
+import 'package:bugman_graphs/models/wall_segment.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  final job = Job(
+    customerName: 'Ada Customer',
+    serviceAddress: '1 Graph Lane',
+    pestPacAccountNumber: 'P-100',
+    serviceType: 'Termite Inspection',
+    createdBy: 'Inspector',
+    createdDate: DateTime(2026, 7, 14),
+  );
+
+  test('tracks dirty state for graph and layer changes', () {
+    final document = GraphDocument.forJob(job);
+
+    expect(document.isDirty, isFalse);
+    expect(document.revision, 0);
+
+    document.replaceWallSegments(const [
+      WallSegment(
+        start: GraphPoint(x: 10, y: 20),
+        end: GraphPoint(x: 80, y: 20),
+      ),
+    ]);
+
+    expect(document.isDirty, isTrue);
+    expect(document.revision, 1);
+
+    document.markClean();
+    expect(document.isDirty, isFalse);
+
+    document.setLayer(
+      'findings',
+      document.layer('findings').copyWith(locked: true),
+    );
+    expect(document.isDirty, isTrue);
+    expect(document.layer('findings').locked, isTrue);
+  });
+
+  test('round-trips every graph object through the document format', () {
+    final document = GraphDocument(
+      customer: GraphCustomerInfo.fromJob(job),
+      wallSegments: const [
+        WallSegment(
+          start: GraphPoint(x: 1, y: 2),
+          end: GraphPoint(x: 40, y: 45),
+          controlPoint: GraphPoint(x: 20, y: 5),
+          color: Color(0xFF245BDB),
+          hasArrow: true,
+        ),
+      ],
+      annotations: const [
+        GraphAnnotation(
+          kind: GraphAnnotationKind.marker,
+          point: GraphPoint(x: 12, y: 18),
+          label: 'Active termites',
+          markerType: GraphMarkerType.activeTermites,
+          note: 'Photo 1',
+        ),
+      ],
+      shapes: const [
+        GraphShape(
+          name: 'Circle 1',
+          segmentIndexes: [0],
+          fillColor: Color(0xFFB6D94C),
+          fillOpacity: 0.3,
+          borderColor: Color(0xFF214D38),
+          borderWidth: 3,
+          pattern: GraphShapePattern.dots,
+          closed: true,
+          rotationDegrees: 15,
+        ),
+      ],
+      freehandStrokes: const [
+        FreehandStroke(
+          points: [GraphPoint(x: 3, y: 4), GraphPoint(x: 9, y: 12)],
+        ),
+      ],
+      metadata: const {'inspectionId': 'I-42'},
+    );
+
+    final restored = GraphDocument.fromJson(document.toJson());
+
+    expect(restored.customer.name, 'Ada Customer');
+    expect(restored.wallSegments.single.isCurve, isTrue);
+    expect(restored.wallSegments.single.hasArrow, isTrue);
+    expect(
+        restored.annotations.single.markerType, GraphMarkerType.activeTermites);
+    expect(restored.shapes.single.pattern, GraphShapePattern.dots);
+    expect(restored.freehandStrokes.single.points, hasLength(2));
+    expect(restored.metadata['inspectionId'], 'I-42');
+    expect(restored.isDirty, isFalse);
+  });
+
+  test('loads the original flat graph payload', () {
+    final restored = GraphDocument.fromJson({
+      'job': {
+        'customerName': 'Legacy Customer',
+        'serviceAddress': 'Old Format Road',
+      },
+      'wallSegments': [
+        {
+          'start': {'x': 0, 'y': 0},
+          'end': {'x': 24, 'y': 0},
+        },
+      ],
+      'annotations': <Object?>[],
+      'shapes': <Object?>[],
+      'freehandStrokes': <Object?>[],
+    });
+
+    expect(restored.customer.name, 'Legacy Customer');
+    expect(restored.wallSegments.single.measurementLabel, '1.0 ft');
+  });
+}

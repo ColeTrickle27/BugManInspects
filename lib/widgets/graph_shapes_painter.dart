@@ -64,7 +64,6 @@ class GraphShapesPainter extends CustomPainter {
       ..strokeWidth = 2;
 
     canvas.drawPath(path, selectedPaint);
-    canvas.drawRect(bounds, selectedPaint);
 
     for (final handleCenter in [
       bounds.topLeft,
