@@ -143,6 +143,7 @@ class CanvasToolbar extends StatelessWidget {
               for (final markerType in const [
                 GraphMarkerType.notePoint,
                 GraphMarkerType.photoPoint,
+                GraphMarkerType.camera,
                 GraphMarkerType.recommendationPoint,
               ]) ...[
                 _MarkerToolButton(
