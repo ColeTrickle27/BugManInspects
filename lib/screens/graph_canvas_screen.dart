@@ -66,6 +66,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   Offset? _pointerDownPosition;
   double _pointerTravel = 0;
   int _activePointerCount = 0;
+  GraphPoint? _pointerDownActiveWallStart;
+  GraphPoint? _pointerDownActivePathStartPoint;
+  int? _pointerDownActivePathStartSegmentIndex;
   DateTime? _lastTapTime;
   Offset? _lastTapSceneOffset;
   _DragTarget? _activeDragTarget;
@@ -355,6 +358,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     if (_activePointerCount == 1) {
       _pointerDownPosition = event.localPosition;
       _pointerTravel = 0;
+      _pointerDownActiveWallStart = _activeWallStart;
+      _pointerDownActivePathStartPoint = _activePathStartPoint;
+      _pointerDownActivePathStartSegmentIndex = _activePathStartSegmentIndex;
       final sceneOffset =
           _transformationController.toScene(event.localPosition);
 
@@ -433,6 +439,17 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     final sceneOffset = _transformationController.toScene(event.localPosition);
+
+    if (wasSinglePointerTap &&
+        _selectedTool != CanvasTool.select &&
+        _isInsideCanvas(sceneOffset) &&
+        _selectExistingObjectAt(sceneOffset)) {
+      _cancelDrawingGestureForSelection();
+      _pointerDownPosition = null;
+      _pointerTravel = 0;
+      _rememberTap(sceneOffset);
+      return;
+    }
 
     if (_isPresetShapeTool(_selectedTool) && _shapeDrawStart != null) {
       if (_isInsideCanvas(sceneOffset)) {
@@ -574,6 +591,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     if (_activePointerCount == 0) {
+      _cancelDrawingGestureForSelection();
       _pointerDownPosition = null;
       _pointerTravel = 0;
       _activeDragTarget = null;
@@ -586,6 +604,20 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _dragOriginalActivePathStartSegmentIndex = null;
       _dragMoved = false;
     }
+  }
+
+  void _cancelDrawingGestureForSelection() {
+    setState(() {
+      _shapeDrawStart = null;
+      _shapeDrawCurrent = null;
+      _draftFreehandPoints = <GraphPoint>[];
+      _draggingLineTool = false;
+      _lineDragStartedNewPath = false;
+      _activeWallStart = _pointerDownActiveWallStart;
+      _activePathStartPoint = _pointerDownActivePathStartPoint;
+      _activePathStartSegmentIndex = _pointerDownActivePathStartSegmentIndex;
+      _previewSegment = null;
+    });
   }
 
   bool _isInsideCanvas(Offset sceneOffset) {
@@ -1379,41 +1411,28 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     };
   }
 
-  void _selectObjectAt(Offset canvasOffset) {
+  bool _selectExistingObjectAt(Offset canvasOffset) {
     final point = GraphPoint.fromOffset(canvasOffset);
-    final annotationIndex = _nearestAnnotationIndex(point);
-    if (annotationIndex != null) {
-      setState(() {
-        _selection = _Selection.annotation(annotationIndex);
-        _canvasStatus = '${_annotations[annotationIndex].label} selected';
-      });
-      return;
+    final selection = _selectionAt(point);
+    if (selection == null) {
+      return false;
     }
 
-    final shapeIndex = _shapeIndexAt(point);
-    if (shapeIndex != null) {
-      setState(() {
-        _selection = _Selection.shape(shapeIndex);
-        _canvasStatus = '${_shapes[shapeIndex].name} selected';
-      });
-      return;
-    }
+    setState(() {
+      _selection = selection;
+      _canvasStatus = switch (selection.kind) {
+        _SelectionKind.annotation =>
+          '${_annotations[selection.index].label} selected',
+        _SelectionKind.shape => '${_shapes[selection.index].name} selected',
+        _SelectionKind.freehand => 'Freehand stroke selected',
+        _SelectionKind.segment => 'Line segment selected',
+      };
+    });
+    return true;
+  }
 
-    final freehandIndex = _nearestFreehandIndex(point);
-    if (freehandIndex != null) {
-      setState(() {
-        _selection = _Selection.freehand(freehandIndex);
-        _canvasStatus = 'Freehand stroke selected';
-      });
-      return;
-    }
-
-    final segmentIndex = _nearestSegmentIndex(point);
-    if (segmentIndex != null) {
-      setState(() {
-        _selection = _Selection.segment(segmentIndex);
-        _canvasStatus = 'Line segment selected';
-      });
+  void _selectObjectAt(Offset canvasOffset) {
+    if (_selectExistingObjectAt(canvasOffset)) {
       return;
     }
 
@@ -1421,6 +1440,26 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _selection = null;
       _canvasStatus = 'Selection cleared';
     });
+  }
+
+  _Selection? _selectionAt(GraphPoint point) {
+    final annotationIndex = _nearestAnnotationIndex(point);
+    if (annotationIndex != null) {
+      return _Selection.annotation(annotationIndex);
+    }
+
+    final shapeIndex = _shapeIndexAt(point);
+    if (shapeIndex != null) {
+      return _Selection.shape(shapeIndex);
+    }
+
+    final freehandIndex = _nearestFreehandIndex(point);
+    if (freehandIndex != null) {
+      return _Selection.freehand(freehandIndex);
+    }
+
+    final segmentIndex = _nearestSegmentIndex(point);
+    return segmentIndex == null ? null : _Selection.segment(segmentIndex);
   }
 
   int? _nearestAnnotationIndex(GraphPoint point) {
@@ -5127,6 +5166,7 @@ class _PropertiesSidebar extends StatelessWidget {
           const SizedBox(height: 10),
           DropdownButtonFormField<GraphShapePattern>(
             initialValue: shape.pattern,
+            isExpanded: true,
             decoration: const InputDecoration(labelText: 'Pattern'),
             items: GraphShapePattern.values
                 .map(
