@@ -8,11 +8,13 @@ class GraphShapesPainter extends CustomPainter {
     required this.shapes,
     required this.segments,
     required this.selectedShapeIndex,
+    this.hoveredShapeIndex,
   });
 
   final List<GraphShape> shapes;
   final List<WallSegment> segments;
   final int? selectedShapeIndex;
+  final int? hoveredShapeIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -37,7 +39,21 @@ class GraphShapesPainter extends CustomPainter {
       _drawPattern(canvas, shape.pattern, path, bounds);
       _drawShapeBorder(canvas, shape, path);
 
-      _drawShapeName(canvas, shape.name, bounds.center);
+      _drawShapeName(
+        canvas,
+        shape.text.trim().isEmpty ? shape.name : shape.text,
+        bounds.center,
+      );
+
+      if (i == hoveredShapeIndex && i != selectedShapeIndex) {
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = const Color(0xFF2F80ED).withValues(alpha: 0.55)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4,
+        );
+      }
 
       if (i == selectedShapeIndex) {
         _drawSelectedShape(canvas, path, bounds);
@@ -310,7 +326,8 @@ class GraphShapesPainter extends CustomPainter {
   bool shouldRepaint(covariant GraphShapesPainter oldDelegate) {
     return oldDelegate.shapes != shapes ||
         oldDelegate.segments != segments ||
-        oldDelegate.selectedShapeIndex != selectedShapeIndex;
+        oldDelegate.selectedShapeIndex != selectedShapeIndex ||
+        oldDelegate.hoveredShapeIndex != hoveredShapeIndex;
   }
 }
 

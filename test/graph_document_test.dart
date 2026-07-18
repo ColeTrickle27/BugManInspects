@@ -77,6 +77,7 @@ void main() {
           pattern: GraphShapePattern.dots,
           closed: true,
           rotationDegrees: 15,
+          text: 'Kitchen',
         ),
       ],
       freehandStrokes: const [
@@ -95,6 +96,7 @@ void main() {
     expect(
         restored.annotations.single.markerType, GraphMarkerType.activeTermites);
     expect(restored.shapes.single.pattern, GraphShapePattern.dots);
+    expect(restored.shapes.single.text, 'Kitchen');
     expect(restored.freehandStrokes.single.points, hasLength(2));
     expect(restored.metadata['inspectionId'], 'I-42');
     expect(restored.isDirty, isFalse);
@@ -102,6 +104,7 @@ void main() {
 
   test('loads the original flat graph payload', () {
     final restored = GraphDocument.fromJson({
+      'legacyVendorField': 'keep-me',
       'job': {
         'customerName': 'Legacy Customer',
         'serviceAddress': 'Old Format Road',
@@ -113,11 +116,41 @@ void main() {
         },
       ],
       'annotations': <Object?>[],
-      'shapes': <Object?>[],
+      'shapes': [
+        {
+          'name': 'Legacy Main',
+          'segmentIndexes': [0],
+          'closed': true,
+          'legacyShapeField': 42,
+        },
+      ],
       'freehandStrokes': <Object?>[],
     });
 
     expect(restored.customer.name, 'Legacy Customer');
     expect(restored.wallSegments.single.measurementLabel, '1.0 ft');
+    expect(restored.shapes.single.name, 'Legacy Main');
+    expect(restored.shapes.single.extraProperties['legacyShapeField'], 42);
+    expect(restored.toJson()['legacyVendorField'], 'keep-me');
+  });
+
+  test('retains marker category and type in saved documents', () {
+    final document = GraphDocument(
+      customer: GraphCustomerInfo.fromJob(job),
+      annotations: const [
+        GraphAnnotation(
+          kind: GraphAnnotationKind.marker,
+          point: GraphPoint(x: 20, y: 30),
+          label: 'VD',
+          markerType: GraphMarkerType.verticalDrill,
+        ),
+      ],
+    );
+
+    final restored = GraphDocument.fromJson(document.toJson());
+    expect(
+        restored.annotations.single.markerType, GraphMarkerType.verticalDrill);
+    expect(restored.annotations.single.markerType.category,
+        GraphMarkerCategory.treatment);
   });
 }

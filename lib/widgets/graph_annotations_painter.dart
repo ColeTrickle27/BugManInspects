@@ -6,12 +6,14 @@ class GraphAnnotationsPainter extends CustomPainter {
   const GraphAnnotationsPainter({
     required this.annotations,
     required this.selectedAnnotationIndex,
+    this.hoveredAnnotationIndex,
     required this.findingsVisible,
     required this.photosVisible,
   });
 
   final List<GraphAnnotation> annotations;
   final int? selectedAnnotationIndex;
+  final int? hoveredAnnotationIndex;
   final bool findingsVisible;
   final bool photosVisible;
 
@@ -37,6 +39,15 @@ class GraphAnnotationsPainter extends CustomPainter {
 
       if (i == selectedAnnotationIndex) {
         _drawSelectionBox(canvas, annotation);
+      } else if (i == hoveredAnnotationIndex) {
+        canvas.drawCircle(
+          annotation.point.offset,
+          25 * annotation.size,
+          Paint()
+            ..color = const Color(0xFF2F80ED).withValues(alpha: 0.55)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3,
+        );
       }
     }
   }
@@ -90,50 +101,81 @@ class GraphAnnotationsPainter extends CustomPainter {
     canvas.rotate(annotation.rotationDegrees * 3.1415926535 / 180);
     canvas.translate(-center.dx, -center.dy);
 
-    if (annotation.markerType == GraphMarkerType.triangle) {
-      final path = Path()
-        ..moveTo(center.dx, center.dy - radius)
-        ..lineTo(center.dx + radius, center.dy + radius)
-        ..lineTo(center.dx - radius, center.dy + radius)
-        ..close();
-      canvas.drawPath(path.shift(const Offset(2, 3)), shadowPaint);
-      canvas.drawPath(path, fillPaint);
-      canvas.drawPath(path, borderPaint);
-    } else if (annotation.markerType == GraphMarkerType.square ||
-        annotation.markerType == GraphMarkerType.baitStation ||
-        annotation.markerType == GraphMarkerType.accessPoint) {
-      final rect = Rect.fromCenter(
-        center: center,
-        width: radius * 1.8,
-        height: radius * 1.8,
-      );
-      canvas.drawRect(rect.shift(const Offset(2, 3)), shadowPaint);
-      canvas.drawRect(rect, fillPaint);
-      canvas.drawRect(rect, borderPaint);
-    } else if (annotation.markerType == GraphMarkerType.damage ||
-        annotation.markerType == GraphMarkerType.termiteDamage ||
-        annotation.markerType == GraphMarkerType.camera ||
-        annotation.markerType == GraphMarkerType.photoPoint ||
-        annotation.markerType == GraphMarkerType.entryPoint) {
-      final markerPath = Path()
-        ..addOval(Rect.fromCircle(center: center, radius: radius))
-        ..moveTo(center.dx - (radius * 0.55), center.dy + (radius * 0.7))
-        ..lineTo(center.dx, center.dy + (radius * 1.75))
-        ..lineTo(center.dx + (radius * 0.55), center.dy + (radius * 0.7))
-        ..close();
-      canvas.drawCircle(center + const Offset(2, 3), radius, shadowPaint);
-      canvas.drawPath(markerPath, fillPaint);
-      canvas.drawPath(markerPath, borderPaint);
-    } else {
-      canvas.drawCircle(center + const Offset(2, 3), radius, shadowPaint);
-      canvas.drawCircle(center, radius, fillPaint);
-      canvas.drawCircle(center, radius, borderPaint);
-    }
+    final markerPath = _markerPath(
+      center,
+      radius,
+      annotation.markerType.category,
+    );
+    canvas.drawPath(markerPath.shift(const Offset(2, 3)), shadowPaint);
+    canvas.drawPath(markerPath, fillPaint);
+    canvas.drawPath(markerPath, borderPaint);
 
     canvas.restore();
     _drawMarkerText(canvas, center, annotation);
     _drawSmallLabel(
         canvas, center + Offset(0, 36 * annotation.size), annotation.label);
+  }
+
+  Path _markerPath(
+    Offset center,
+    double radius,
+    GraphMarkerCategory category,
+  ) {
+    switch (category) {
+      case GraphMarkerCategory.insectFindings:
+        return Path()..addOval(Rect.fromCircle(center: center, radius: radius));
+      case GraphMarkerCategory.structureFindings:
+        return Path()
+          ..moveTo(center.dx, center.dy - radius)
+          ..lineTo(center.dx + radius, center.dy)
+          ..lineTo(center.dx, center.dy + radius)
+          ..lineTo(center.dx - radius, center.dy)
+          ..close();
+      case GraphMarkerCategory.moistureFindings:
+        return Path()
+          ..moveTo(center.dx, center.dy - (radius * 1.15))
+          ..quadraticBezierTo(
+            center.dx + (radius * 1.25),
+            center.dy + (radius * 0.35),
+            center.dx,
+            center.dy + radius,
+          )
+          ..quadraticBezierTo(
+            center.dx - (radius * 1.25),
+            center.dy + (radius * 0.35),
+            center.dx,
+            center.dy - (radius * 1.15),
+          )
+          ..close();
+      case GraphMarkerCategory.structureDetails:
+        return Path()
+          ..addRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                center: center,
+                width: radius * 2,
+                height: radius * 1.7,
+              ),
+              Radius.circular(radius * 0.28),
+            ),
+          );
+      case GraphMarkerCategory.treatment:
+        return Path()
+          ..moveTo(center.dx, center.dy - radius)
+          ..lineTo(center.dx + (radius * 0.86), center.dy - (radius * 0.5))
+          ..lineTo(center.dx + (radius * 0.86), center.dy + (radius * 0.5))
+          ..lineTo(center.dx, center.dy + radius)
+          ..lineTo(center.dx - (radius * 0.86), center.dy + (radius * 0.5))
+          ..lineTo(center.dx - (radius * 0.86), center.dy - (radius * 0.5))
+          ..close();
+      case GraphMarkerCategory.review:
+        return Path()
+          ..addOval(Rect.fromCircle(center: center, radius: radius))
+          ..moveTo(center.dx - (radius * 0.25), center.dy + (radius * 0.8))
+          ..lineTo(center.dx - (radius * 0.7), center.dy + (radius * 1.35))
+          ..lineTo(center.dx + (radius * 0.25), center.dy + (radius * 0.85))
+          ..close();
+    }
   }
 
   void _drawMarkerText(
@@ -253,6 +295,7 @@ class GraphAnnotationsPainter extends CustomPainter {
   bool shouldRepaint(covariant GraphAnnotationsPainter oldDelegate) {
     return oldDelegate.annotations != annotations ||
         oldDelegate.selectedAnnotationIndex != selectedAnnotationIndex ||
+        oldDelegate.hoveredAnnotationIndex != hoveredAnnotationIndex ||
         oldDelegate.findingsVisible != findingsVisible ||
         oldDelegate.photosVisible != photosVisible;
   }

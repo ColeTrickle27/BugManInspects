@@ -8,16 +8,23 @@ class FreehandStrokesPainter extends CustomPainter {
     required this.strokes,
     required this.draftPoints,
     required this.selectedStrokeIndex,
+    this.hoveredStrokeIndex,
   });
 
   final List<FreehandStroke> strokes;
   final List<GraphPoint> draftPoints;
   final int? selectedStrokeIndex;
+  final int? hoveredStrokeIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
     for (var i = 0; i < strokes.length; i += 1) {
-      _drawStroke(canvas, strokes[i], selected: i == selectedStrokeIndex);
+      _drawStroke(
+        canvas,
+        strokes[i],
+        selected: i == selectedStrokeIndex,
+        hovered: i == hoveredStrokeIndex,
+      );
     }
 
     if (draftPoints.length > 1) {
@@ -38,7 +45,20 @@ class FreehandStrokesPainter extends CustomPainter {
     Canvas canvas,
     FreehandStroke stroke, {
     required bool selected,
+    required bool hovered,
   }) {
+    if (hovered && !selected) {
+      _drawPath(
+        canvas,
+        stroke.points,
+        Paint()
+          ..color = const Color(0xFF2F80ED).withValues(alpha: 0.38)
+          ..strokeWidth = stroke.strokeWidth + 8
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round,
+      );
+    }
     _drawPath(
       canvas,
       stroke.points,
@@ -94,6 +114,7 @@ class FreehandStrokesPainter extends CustomPainter {
   bool shouldRepaint(covariant FreehandStrokesPainter oldDelegate) {
     return oldDelegate.strokes != strokes ||
         oldDelegate.draftPoints != draftPoints ||
-        oldDelegate.selectedStrokeIndex != selectedStrokeIndex;
+        oldDelegate.selectedStrokeIndex != selectedStrokeIndex ||
+        oldDelegate.hoveredStrokeIndex != hoveredStrokeIndex;
   }
 }

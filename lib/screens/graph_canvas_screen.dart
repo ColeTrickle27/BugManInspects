@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../editor/editor_interaction_controller.dart';
 import '../models/graph_annotation.dart';
 import '../models/graph_document.dart';
 import '../models/freehand_stroke.dart';
@@ -46,7 +47,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   final TransformationController _transformationController =
       TransformationController();
   late final GraphDocument _document;
-  CanvasTool _selectedTool = CanvasTool.select;
+  late final EditorInteractionController _interaction;
   final List<_UndoEntry> _undoStack = <_UndoEntry>[];
   final List<_RedoEntry> _redoStack = <_RedoEntry>[];
   bool _applyingHistory = false;
@@ -55,6 +56,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   GraphPoint? _pendingCurveControlPoint;
   WallSegment? _previewSegment;
   int? _activePathStartSegmentIndex;
+  _EditorSnapshot? _structureStartSnapshot;
   String _canvasStatus = 'Select selected: click an object';
   _Selection? _selection;
   bool _gridVisible = true;
@@ -64,6 +66,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   bool _layersCollapsed = false;
   String _scaleLabel = '1:1';
   Offset? _pointerDownPosition;
+  _Selection? _pointerDownHitSelection;
+  _Selection? _hoverSelection;
   double _pointerTravel = 0;
   int _activePointerCount = 0;
   GraphPoint? _pointerDownActiveWallStart;
@@ -86,10 +90,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   _ClipboardItem? _clipboardItem;
   bool _draggingLineTool = false;
   bool _lineDragStartedNewPath = false;
-  GraphMarkerType _selectedMarkerType = GraphMarkerType.termiteActivity;
-  Color _selectedMarkerColor = GraphMarkerType.termiteActivity.defaultColor;
+  Color _selectedMarkerColor = GraphMarkerType.activeTermites.defaultColor;
   double _selectedMarkerSize = 1;
-  GraphDrawingPreset? _selectedDrawingPreset;
   final Map<GraphDrawingPreset, _DrawingStyleDefaults> _drawingPresetDefaults =
       {
     for (final preset in GraphDrawingPreset.values)
@@ -107,6 +109,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   Color _defaultLineColor = const Color(0xFF214D38);
   double _defaultLineWidth = 5;
   LinePattern _defaultLinePattern = LinePattern.solid;
+  Color _defaultArrowColor = const Color(0xFF214D38);
+  double _defaultArrowWidth = 5;
+  LinePattern _defaultArrowPattern = LinePattern.solid;
   double _defaultTextFontSize = 16;
   Color _defaultTextColor = const Color(0xFF1C2B22);
   Color _defaultTextBackground = const Color(0xFFFFF2B8);
@@ -114,6 +119,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   Color _defaultFreehandColor = const Color(0xFF214D38);
   double _defaultFreehandWidth = 4;
   double _defaultFreehandOpacity = 0.95;
+  CanvasTool get _selectedTool => _interaction.primaryTool;
+  GraphMarkerType get _selectedMarkerType => _interaction.markerType;
+  GraphDrawingPreset get _selectedStructureType => _interaction.structureType;
+  GraphDrawingPreset? get _selectedDrawingPreset =>
+      _selectedTool == CanvasTool.structure ? _selectedStructureType : null;
   List<WallSegment> get _wallSegments => _document.wallSegments;
   set _wallSegments(List<WallSegment> value) =>
       _document.replaceWallSegments(value);
@@ -143,6 +153,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   void initState() {
     super.initState();
     _document = GraphDocument.forJob(widget.job);
+    _interaction = EditorInteractionController();
     _document.addListener(_handleDocumentChanged);
   }
 
@@ -156,15 +167,19 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   void dispose() {
     _document.removeListener(_handleDocumentChanged);
     _document.dispose();
+    _interaction.dispose();
     _editorFocusNode.dispose();
     _transformationController.dispose();
     super.dispose();
   }
 
   void _selectTool(CanvasTool tool) {
+    if (_selectedTool == CanvasTool.structure &&
+        _interaction.drawingSession == EditorDrawingSession.plottingStructure) {
+      _cancelActiveStructure();
+    }
     setState(() {
-      _selectedTool = tool;
-      _selectedDrawingPreset = null;
+      _interaction.selectTool(tool);
       _canvasStatus = _toolStatus(tool);
       _previewSegment = null;
     });
@@ -174,9 +189,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   void _selectMarker(GraphMarkerType markerType) {
     final markerDefault = _markerDefaultsFor(markerType);
     setState(() {
-      _selectedTool = CanvasTool.marker;
-      _selectedDrawingPreset = null;
-      _selectedMarkerType = markerType;
+      _interaction.selectMarker(markerType);
       _selectedMarkerColor = markerDefault.color;
       _selectedMarkerSize = markerDefault.size;
       _canvasStatus = '${markerType.label}: tap to place';
@@ -186,17 +199,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _selectDrawingPreset(GraphDrawingPreset preset) {
+    if (_selectedTool == CanvasTool.structure &&
+        _interaction.drawingSession == EditorDrawingSession.plottingStructure) {
+      _cancelActiveStructure();
+    }
     setState(() {
-      _selectedDrawingPreset = preset;
-      _selectedTool = preset.kind == GraphDrawingPresetKind.line
-          ? CanvasTool.wall
-          : CanvasTool.rectangle;
+      _interaction.selectStructure(preset);
       _activeWallStart = null;
       _activePathStartPoint = null;
       _activePathStartSegmentIndex = null;
       _pendingCurveControlPoint = null;
       _previewSegment = null;
-      _canvasStatus = '${preset.label}: draw on the graph';
+      _canvasStatus = '${preset.label}: click each corner, then Finish';
     });
     _editorFocusNode.requestFocus();
   }
@@ -217,13 +231,22 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   Color get _currentLineColor =>
-      _selectedDrawingDefaults?.lineColor ?? _defaultLineColor;
+      _selectedDrawingDefaults?.lineColor ??
+      (_selectedTool == CanvasTool.arrow
+          ? _defaultArrowColor
+          : _defaultLineColor);
 
   double get _currentLineWidth =>
-      _selectedDrawingDefaults?.lineWidth ?? _defaultLineWidth;
+      _selectedDrawingDefaults?.lineWidth ??
+      (_selectedTool == CanvasTool.arrow
+          ? _defaultArrowWidth
+          : _defaultLineWidth);
 
   LinePattern get _currentLinePattern =>
-      _selectedDrawingDefaults?.linePattern ?? _defaultLinePattern;
+      _selectedDrawingDefaults?.linePattern ??
+      (_selectedTool == CanvasTool.arrow
+          ? _defaultArrowPattern
+          : _defaultLinePattern);
 
   Color? get _currentShapeFillColor =>
       _selectedDrawingDefaults?.fillColor ?? _defaultShapeFillColor;
@@ -240,44 +263,78 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   GraphShapePattern get _currentShapePattern =>
       _selectedDrawingDefaults?.pattern ?? _defaultShapePattern;
 
-  void _handleKeyEvent(KeyEvent event) {
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) {
-      return;
+      return KeyEventResult.ignored;
     }
 
     final isControlPressed = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
     final key = event.logicalKey;
 
+    if (isControlPressed && key == LogicalKeyboardKey.keyZ) {
+      if (!HardwareKeyboard.instance.isShiftPressed &&
+          _selectedTool == CanvasTool.structure &&
+          _interaction.drawingSession ==
+              EditorDrawingSession.plottingStructure) {
+        _removeLastStructurePoint();
+        return KeyEventResult.handled;
+      }
+      if (HardwareKeyboard.instance.isShiftPressed) {
+        _redoLastAction();
+      } else {
+        _undoLastAction();
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (isControlPressed && key == LogicalKeyboardKey.keyY) {
+      _redoLastAction();
+      return KeyEventResult.handled;
+    }
+
     if (isControlPressed && key == LogicalKeyboardKey.keyD) {
       _duplicateSelection();
-      return;
+      return KeyEventResult.handled;
     }
 
     if (isControlPressed && key == LogicalKeyboardKey.keyC) {
       _copySelection();
-      return;
+      return KeyEventResult.handled;
     }
 
     if (isControlPressed && key == LogicalKeyboardKey.keyV) {
       _pasteClipboard();
-      return;
+      return KeyEventResult.handled;
     }
 
     if (key == LogicalKeyboardKey.delete ||
         key == LogicalKeyboardKey.backspace) {
       _deleteSelection();
-      return;
+      return KeyEventResult.handled;
     }
 
     if (isControlPressed) {
-      return;
+      return KeyEventResult.ignored;
+    }
+
+    if (key == LogicalKeyboardKey.enter &&
+        _selectedTool == CanvasTool.structure) {
+      _finishStructurePath();
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.escape) {
+      _cancelActiveDrawing();
+      return KeyEventResult.handled;
     }
 
     if (key == LogicalKeyboardKey.keyV) {
       _selectTool(CanvasTool.select);
     } else if (key == LogicalKeyboardKey.keyH) {
       _selectTool(CanvasTool.pan);
+    } else if (key == LogicalKeyboardKey.keyB) {
+      _selectDrawingPreset(_selectedStructureType);
     } else if (key == LogicalKeyboardKey.keyR) {
       _selectTool(CanvasTool.rectangle);
     } else if (key == LogicalKeyboardKey.keyS) {
@@ -300,7 +357,31 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _selectTool(CanvasTool.text);
     } else if (key == LogicalKeyboardKey.keyP) {
       _selectTool(CanvasTool.photo);
+    } else {
+      return KeyEventResult.ignored;
     }
+    return KeyEventResult.handled;
+  }
+
+  void _cancelActiveDrawing() {
+    if (_selectedTool == CanvasTool.structure &&
+        _interaction.drawingSession == EditorDrawingSession.plottingStructure) {
+      _cancelActiveStructure();
+      return;
+    }
+
+    setState(() {
+      _shapeDrawStart = null;
+      _shapeDrawCurrent = null;
+      _draftFreehandPoints = <GraphPoint>[];
+      _activeWallStart = null;
+      _activePathStartPoint = null;
+      _activePathStartSegmentIndex = null;
+      _pendingCurveControlPoint = null;
+      _previewSegment = null;
+      _interaction.setDrawingSession(EditorDrawingSession.idle);
+      _canvasStatus = 'Drawing cancelled';
+    });
   }
 
   String _toolStatus(CanvasTool tool) {
@@ -309,6 +390,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         return 'Select selected: click or drag objects';
       case CanvasTool.pan:
         return 'Pan selected: drag the canvas';
+      case CanvasTool.structure:
+        return _activeWallStart == null
+            ? '${_selectedStructureType.label}: click the first corner'
+            : '${_selectedStructureType.label}: click the next corner';
       case CanvasTool.rectangle:
         return 'Rectangle selected: tap or drag on the graph';
       case CanvasTool.square:
@@ -363,6 +448,23 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _pointerDownActivePathStartSegmentIndex = _activePathStartSegmentIndex;
       final sceneOffset =
           _transformationController.toScene(event.localPosition);
+      _interaction.pointerDown(sceneOffset);
+      _pointerDownHitSelection =
+          _selectionAt(GraphPoint.fromOffset(sceneOffset));
+
+      final hitSelection = _pointerDownHitSelection;
+      if (hitSelection != null) {
+        setState(() {
+          _selection = hitSelection;
+          _interaction.setSelected(_interactionReference(hitSelection));
+          _canvasStatus = _selectionStatus(hitSelection);
+        });
+        if (_isSelectionEditable(hitSelection)) {
+          _startDragForSelection(
+              hitSelection, GraphPoint.fromOffset(sceneOffset));
+        }
+        return;
+      }
 
       if (_isPresetShapeTool(_selectedTool)) {
         _shapeDrawStart = sceneOffset;
@@ -372,8 +474,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       } else if (_selectedTool == CanvasTool.wall ||
           _selectedTool == CanvasTool.arrow) {
         _startLineDrag(sceneOffset);
-      } else if (_selectedTool == CanvasTool.select) {
-        _startDragIfPossible(GraphPoint.fromOffset(sceneOffset));
       }
     }
   }
@@ -389,7 +489,19 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _pointerTravel = distance;
     }
 
-    if (_isPresetShapeTool(_selectedTool) && _shapeDrawStart != null) {
+    if (_activeDragTarget != null) {
+      if (_pointerTravel <= _tapMovementLimit) {
+        return;
+      }
+      _interaction.beginDrag();
+      final sceneOffset =
+          _transformationController.toScene(event.localPosition);
+      if (_isInsideCanvas(sceneOffset)) {
+        _moveActiveTarget(GraphPoint.fromOffset(sceneOffset));
+      }
+    } else if (_isPresetShapeTool(_selectedTool) &&
+        _shapeDrawStart != null &&
+        _pointerTravel > _tapMovementLimit) {
       final sceneOffset =
           _transformationController.toScene(event.localPosition);
       if (_isInsideCanvas(sceneOffset)) {
@@ -404,13 +516,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       if (_isInsideCanvas(sceneOffset)) {
         _appendFreehandPoint(sceneOffset);
       }
-    } else if (_selectedTool == CanvasTool.select &&
-        _activeDragTarget != null) {
-      final sceneOffset =
-          _transformationController.toScene(event.localPosition);
-      if (_isInsideCanvas(sceneOffset)) {
-        _moveActiveTarget(GraphPoint.fromOffset(sceneOffset));
-      }
     } else {
       final sceneOffset =
           _transformationController.toScene(event.localPosition);
@@ -423,6 +528,21 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   void _handlePointerHover(PointerHoverEvent event) {
     final sceneOffset = _transformationController.toScene(event.localPosition);
     if (_isInsideCanvas(sceneOffset)) {
+      final nextHover = _selectionAt(GraphPoint.fromOffset(sceneOffset));
+      if (nextHover != _hoverSelection) {
+        setState(() {
+          _hoverSelection = nextHover;
+          _interaction.setHovered(
+            nextHover == null ? null : _interactionReference(nextHover),
+          );
+        });
+      }
+      if (nextHover != null) {
+        if (_previewSegment != null) {
+          setState(() => _previewSegment = null);
+        }
+        return;
+      }
       _updatePreviewSegment(sceneOffset);
     }
   }
@@ -440,19 +560,25 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     final sceneOffset = _transformationController.toScene(event.localPosition);
 
-    if (wasSinglePointerTap &&
-        _selectedTool != CanvasTool.select &&
-        _isInsideCanvas(sceneOffset) &&
-        _selectExistingObjectAt(sceneOffset)) {
+    if (_pointerDownHitSelection != null) {
+      if (wasSinglePointerTap &&
+          _isDoubleClickNearLastTap(sceneOffset) &&
+          _editSelectedObjectText()) {
+        _resetPointerGesture();
+        _rememberTap(sceneOffset);
+        return;
+      }
+      if (_dragMoved) {
+        _finishActiveDrag();
+      }
       _cancelDrawingGestureForSelection();
-      _pointerDownPosition = null;
-      _pointerTravel = 0;
+      _resetPointerGesture();
       _rememberTap(sceneOffset);
       return;
     }
 
     if (_isPresetShapeTool(_selectedTool) && _shapeDrawStart != null) {
-      if (_isInsideCanvas(sceneOffset)) {
+      if (_isInsideCanvas(sceneOffset) && !wasSinglePointerTap) {
         _finishPresetShape(sceneOffset);
       }
       _shapeDrawStart = null;
@@ -521,23 +647,25 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       }
     }
 
-    if (_selectedTool == CanvasTool.select && _activeDragTarget != null) {
-      _finishActiveDrag();
-    }
-
     if (_activePointerCount == 0) {
-      _pointerDownPosition = null;
-      _pointerTravel = 0;
-      _activeDragTarget = null;
-      _dragOriginalWallSegments = null;
-      _dragOriginalAnnotations = null;
-      _dragOriginalShapes = null;
-      _dragOriginalFreehandStrokes = null;
-      _dragOriginalActiveWallStart = null;
-      _dragOriginalActivePathStartPoint = null;
-      _dragOriginalActivePathStartSegmentIndex = null;
-      _dragMoved = false;
+      _resetPointerGesture();
     }
+  }
+
+  void _resetPointerGesture() {
+    _pointerDownPosition = null;
+    _pointerDownHitSelection = null;
+    _pointerTravel = 0;
+    _activeDragTarget = null;
+    _dragOriginalWallSegments = null;
+    _dragOriginalAnnotations = null;
+    _dragOriginalShapes = null;
+    _dragOriginalFreehandStrokes = null;
+    _dragOriginalActiveWallStart = null;
+    _dragOriginalActivePathStartPoint = null;
+    _dragOriginalActivePathStartSegmentIndex = null;
+    _dragMoved = false;
+    _interaction.pointerUp();
   }
 
   void _rememberTap(Offset sceneOffset) {
@@ -547,7 +675,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   bool _shouldFinishFromDoubleClick(Offset sceneOffset) {
     if (_activeWallStart == null ||
-        (_selectedTool != CanvasTool.wall &&
+        (_selectedTool != CanvasTool.structure &&
+            _selectedTool != CanvasTool.wall &&
             _selectedTool != CanvasTool.arrow &&
             _selectedTool != CanvasTool.curve)) {
       return false;
@@ -592,17 +721,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     if (_activePointerCount == 0) {
       _cancelDrawingGestureForSelection();
-      _pointerDownPosition = null;
-      _pointerTravel = 0;
-      _activeDragTarget = null;
-      _dragOriginalWallSegments = null;
-      _dragOriginalAnnotations = null;
-      _dragOriginalShapes = null;
-      _dragOriginalFreehandStrokes = null;
-      _dragOriginalActiveWallStart = null;
-      _dragOriginalActivePathStartPoint = null;
-      _dragOriginalActivePathStartSegmentIndex = null;
-      _dragMoved = false;
+      _resetPointerGesture();
     }
   }
 
@@ -681,7 +800,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   void _updatePreviewSegment(Offset sceneOffset) {
     final activeStart = _activeWallStart;
     if (activeStart == null ||
-        (_selectedTool != CanvasTool.wall &&
+        (_selectedTool != CanvasTool.structure &&
+            _selectedTool != CanvasTool.wall &&
             _selectedTool != CanvasTool.arrow &&
             _selectedTool != CanvasTool.curve)) {
       if (_previewSegment != null) {
@@ -694,7 +814,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     final rawPoint = GraphPoint.fromOffset(sceneOffset);
     final endpointSnap = _findNearbyEndpoint(rawPoint);
-    final previewEnd = _selectedTool == CanvasTool.wall ||
+    final previewEnd = _selectedTool == CanvasTool.structure ||
+            _selectedTool == CanvasTool.wall ||
             _selectedTool == CanvasTool.arrow
         ? endpointSnap ?? _snapWallPoint(rawPoint, activeStart)
         : endpointSnap ?? (_snapToGrid ? _snapPointToGrid(rawPoint) : rawPoint);
@@ -730,6 +851,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     if (_selectedTool == CanvasTool.pan) {
       _showCanvasMessage('Pan selected: drag to move around canvas');
+      return;
+    }
+
+    if (_selectedTool == CanvasTool.structure) {
+      _addStructurePoint(sceneOffset);
       return;
     }
 
@@ -857,19 +983,17 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   void _finishPresetShape(Offset endOffset) {
     final start = _shapeDrawStart ?? endOffset;
     final distance = (endOffset - start).distance;
-    final defaultSize = switch (_selectedTool) {
-      CanvasTool.circle || CanvasTool.square => const Size(132, 132),
-      CanvasTool.triangle => const Size(150, 126),
-      _ => const Size(170, 116),
-    };
-    final rect = distance <= _tapMovementLimit
-        ? Rect.fromCenter(
-            center: endOffset,
-            width: defaultSize.width,
-            height: defaultSize.height)
-        : _rectFromDrag(start, endOffset,
-            forceSquare: _selectedTool == CanvasTool.square ||
-                _selectedTool == CanvasTool.circle);
+    if (distance <= _tapMovementLimit) {
+      _showCanvasMessage('Drag to create a shape');
+      return;
+    }
+
+    final rect = _rectFromDrag(
+      start,
+      endOffset,
+      forceSquare: _selectedTool == CanvasTool.square ||
+          _selectedTool == CanvasTool.circle,
+    );
 
     _addPresetShape(rect);
   }
@@ -1034,6 +1158,182 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           ),
         ),
     ];
+  }
+
+  bool _editSelectedObjectText() {
+    final selection = _selection;
+    if (selection == null) {
+      return false;
+    }
+    if (selection.kind == _SelectionKind.shape) {
+      final shape = _shapes[selection.index];
+      if (shape.isStructure) {
+        return false;
+      }
+      _editShapeText(selection.index);
+      return true;
+    }
+    if (selection.kind == _SelectionKind.annotation &&
+        _annotations[selection.index].kind == GraphAnnotationKind.text) {
+      _editTextAnnotation(selection.index);
+      return true;
+    }
+    return false;
+  }
+
+  void _addStructurePoint(Offset canvasOffset) {
+    if (_isLayerLocked(_GraphLayer.structure) ||
+        _isLayerLocked(_GraphLayer.shapes)) {
+      _showCanvasMessage('Unlock Structure and Shapes to draw a structure');
+      return;
+    }
+
+    final tappedPoint = GraphPoint.fromOffset(canvasOffset);
+    final activeStart = _activeWallStart;
+    final endpointSnap = _findNearbyEndpoint(tappedPoint);
+    final nextPoint = endpointSnap ?? _snapWallPoint(tappedPoint, activeStart);
+
+    if (activeStart == null) {
+      setState(() {
+        _structureStartSnapshot = _EditorSnapshot.capture(this);
+        _activeWallStart = nextPoint;
+        _activePathStartPoint = nextPoint;
+        _activePathStartSegmentIndex = _wallSegments.length;
+        _interaction.setDrawingSession(EditorDrawingSession.plottingStructure);
+        _canvasStatus = '${_selectedStructureType.label}: first corner placed';
+      });
+      return;
+    }
+
+    if (activeStart.distanceTo(nextPoint) < _minimumWallLength) {
+      _showCanvasMessage('Place the next corner farther away');
+      return;
+    }
+
+    final segment = WallSegment(
+      start: activeStart,
+      end: nextPoint,
+      color: _currentShapeBorderColor,
+      strokeWidth: _currentShapeBorderWidth,
+      pattern: _currentLinePattern,
+    );
+
+    setState(() {
+      _wallSegments = <WallSegment>[..._wallSegments, segment];
+      _activeWallStart = nextPoint;
+      _canvasStatus =
+          '${_selectedStructureType.label}: corner placed â€¢ Finish, Enter, or double-click';
+    });
+  }
+
+  void _cancelActiveStructure() {
+    final snapshot = _structureStartSnapshot;
+    setState(() {
+      if (snapshot != null) {
+        _applyingHistory = true;
+        snapshot.restore(this);
+        _applyingHistory = false;
+      } else {
+        _activeWallStart = null;
+        _activePathStartPoint = null;
+        _activePathStartSegmentIndex = null;
+        _previewSegment = null;
+      }
+      _structureStartSnapshot = null;
+      _interaction.setDrawingSession(EditorDrawingSession.idle);
+      _canvasStatus = 'Unfinished structure cancelled';
+    });
+  }
+
+  void _removeLastStructurePoint() {
+    final startIndex = _activePathStartSegmentIndex;
+    if (startIndex == null) {
+      return;
+    }
+    if (_wallSegments.length <= startIndex) {
+      _cancelActiveStructure();
+      return;
+    }
+
+    final removed = _wallSegments.last;
+    setState(() {
+      _wallSegments = _wallSegments.sublist(0, _wallSegments.length - 1);
+      _activeWallStart = removed.start;
+      _previewSegment = null;
+      _canvasStatus = 'Last structure point removed';
+    });
+  }
+
+  void _finishStructurePath() {
+    final preset = _selectedStructureType;
+    final startIndex = _activePathStartSegmentIndex;
+    final pathStart = _activePathStartPoint;
+    final pathEnd = _activeWallStart;
+    final before = _structureStartSnapshot;
+    if (startIndex == null ||
+        pathStart == null ||
+        pathEnd == null ||
+        before == null) {
+      _showCanvasMessage('Place the first structure point before finishing');
+      return;
+    }
+
+    final segmentCount = _wallSegments.length - startIndex;
+    final isArea = preset.kind == GraphDrawingPresetKind.area;
+    if (segmentCount < (isArea ? 2 : 1)) {
+      _showCanvasMessage(
+        isArea
+            ? 'A structure needs at least three plotted corners'
+            : 'Plot at least two points before finishing',
+      );
+      return;
+    }
+
+    setState(() {
+      final segmentIndexes = <int>[
+        for (var i = startIndex; i < _wallSegments.length; i += 1) i,
+      ];
+      if (isArea && pathEnd.distanceTo(pathStart) > _minimumWallLength) {
+        segmentIndexes.add(_wallSegments.length);
+        _wallSegments = <WallSegment>[
+          ..._wallSegments,
+          WallSegment(
+            start: pathEnd,
+            end: pathStart,
+            color: _currentShapeBorderColor,
+            strokeWidth: _currentShapeBorderWidth,
+            pattern: _currentLinePattern,
+          ),
+        ];
+      }
+
+      final defaults = _drawingDefaultsFor(preset);
+      final shape = GraphShape(
+        name: preset.label,
+        segmentIndexes: segmentIndexes,
+        fillColor: isArea ? defaults.fillColor : null,
+        fillOpacity: isArea ? defaults.fillOpacity : 0,
+        borderColor: defaults.borderColor,
+        borderWidth: defaults.borderWidth,
+        pattern: isArea ? defaults.pattern : GraphShapePattern.none,
+        closed: isArea,
+        rotationDegrees: 0,
+        preset: preset,
+      );
+      _shapes = <GraphShape>[..._shapes, shape];
+      _selection = _Selection.shape(_shapes.length - 1);
+      _interaction.setSelected(_interactionReference(_selection!));
+      _undoStack.add(
+        _UndoEntry(_UndoKind.snapshot, previousSnapshot: before),
+      );
+      _activeWallStart = null;
+      _activePathStartPoint = null;
+      _activePathStartSegmentIndex = null;
+      _previewSegment = null;
+      _structureStartSnapshot = null;
+      _interaction.setDrawingSession(EditorDrawingSession.idle);
+      _canvasStatus = '${preset.label} finished';
+    });
   }
 
   void _addWallPoint(Offset canvasOffset) {
@@ -1420,13 +1720,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     setState(() {
       _selection = selection;
-      _canvasStatus = switch (selection.kind) {
-        _SelectionKind.annotation =>
-          '${_annotations[selection.index].label} selected',
-        _SelectionKind.shape => '${_shapes[selection.index].name} selected',
-        _SelectionKind.freehand => 'Freehand stroke selected',
-        _SelectionKind.segment => 'Line segment selected',
-      };
+      _interaction.setSelected(_interactionReference(selection));
+      _canvasStatus = _selectionStatus(selection);
     });
     return true;
   }
@@ -1438,9 +1733,29 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     setState(() {
       _selection = null;
+      _interaction.setSelected(null);
       _canvasStatus = 'Selection cleared';
     });
   }
+
+  String _selectionStatus(_Selection selection) => switch (selection.kind) {
+        _SelectionKind.annotation =>
+          '${_annotations[selection.index].label} selected',
+        _SelectionKind.shape => '${_shapes[selection.index].name} selected',
+        _SelectionKind.freehand => 'Freehand stroke selected',
+        _SelectionKind.segment => 'Line or arrow selected',
+      };
+
+  EditorObjectReference _interactionReference(_Selection selection) =>
+      EditorObjectReference(
+        switch (selection.kind) {
+          _SelectionKind.annotation => EditorObjectKind.annotation,
+          _SelectionKind.shape => EditorObjectKind.shape,
+          _SelectionKind.freehand => EditorObjectKind.freehand,
+          _SelectionKind.segment => EditorObjectKind.segment,
+        },
+        selection.index,
+      );
 
   _Selection? _selectionAt(GraphPoint point) {
     final annotationIndex = _nearestAnnotationIndex(point);
@@ -1463,23 +1778,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   int? _nearestAnnotationIndex(GraphPoint point) {
-    int? nearestIndex;
-    var nearestDistance = _dragHitDistance;
-
     for (var i = _annotations.length - 1; i >= 0; i -= 1) {
       if (!_isAnnotationVisible(_annotations[i])) {
         continue;
       }
 
       final distance = _annotations[i].point.distanceTo(point);
-
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = i;
+      if (distance <= _dragHitDistance) {
+        return i;
       }
     }
 
-    return nearestIndex;
+    return null;
   }
 
   int? _nearestSegmentIndex(GraphPoint point) {
@@ -1487,25 +1797,27 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return null;
     }
 
-    int? nearestIndex;
-    var nearestDistance = _dragHitDistance;
     final shapeSegmentIndexes = _shapeSegmentIndexSet;
+    final draftStart =
+        _interaction.drawingSession == EditorDrawingSession.plottingStructure
+            ? _activePathStartSegmentIndex
+            : null;
 
-    for (var i = 0; i < _wallSegments.length; i += 1) {
-      if (shapeSegmentIndexes.contains(i)) {
+    for (var i = _wallSegments.length - 1; i >= 0; i -= 1) {
+      if (shapeSegmentIndexes.contains(i) ||
+          (draftStart != null && i >= draftStart)) {
         continue;
       }
 
       final segment = _wallSegments[i];
       final distance = _distanceToSegment(point, segment);
 
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = i;
+      if (distance <= _dragHitDistance) {
+        return i;
       }
     }
 
-    return nearestIndex;
+    return null;
   }
 
   double _distanceToSegment(GraphPoint point, WallSegment segment) {
@@ -1532,10 +1844,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return null;
     }
 
-    int? nearestIndex;
-    var nearestDistance = _dragHitDistance;
-
-    for (var i = 0; i < _freehandStrokes.length; i += 1) {
+    for (var i = _freehandStrokes.length - 1; i >= 0; i -= 1) {
       final stroke = _freehandStrokes[i];
       for (var p = 1; p < stroke.points.length; p += 1) {
         final distance = _distanceToLinePoints(
@@ -1543,14 +1852,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           stroke.points[p - 1],
           stroke.points[p],
         );
-        if (distance < nearestDistance) {
-          nearestDistance = distance;
-          nearestIndex = i;
+        if (distance <= _dragHitDistance) {
+          return i;
         }
       }
     }
 
-    return nearestIndex;
+    return null;
   }
 
   double _distanceToLinePoints(
@@ -1629,11 +1937,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     return path;
   }
 
-  void _startDragIfPossible(GraphPoint point) {
-    final target = _findDragTarget(point);
-
+  void _startDragForSelection(_Selection selection, GraphPoint point) {
+    final target = _dragTargetForSelection(selection, point);
     if (target == null) {
-      _canvasStatus = 'Move selected: drag a point or item';
       return;
     }
 
@@ -1646,60 +1952,41 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _dragOriginalActivePathStartPoint = _activePathStartPoint;
     _dragOriginalActivePathStartSegmentIndex = _activePathStartSegmentIndex;
     _dragMoved = false;
-
-    setState(() {
-      _selection = target.selection;
-      _canvasStatus = switch (target.kind) {
-        _DragKind.wallEndpoint => 'Moving wall point',
-        _DragKind.annotation => 'Moving item',
-        _DragKind.shape => 'Moving shape',
-        _DragKind.shapeResize => 'Resizing shape',
-        _DragKind.shapeRotation => 'Rotating shape',
-        _DragKind.freehand => 'Moving freehand stroke',
-      };
-    });
+    _interaction.setDrawingSession(EditorDrawingSession.movingObject);
   }
 
-  _DragTarget? _findDragTarget(GraphPoint point) {
-    final resizeTarget = _nearestShapeResizeTarget(point);
-    if (resizeTarget != null) {
-      return resizeTarget;
+  _DragTarget? _dragTargetForSelection(
+    _Selection selection,
+    GraphPoint point,
+  ) {
+    if (!_isSelectionEditable(selection)) {
+      return null;
     }
 
-    final rotationTarget = _nearestShapeRotationTarget(point);
-    if (rotationTarget != null) {
-      return rotationTarget;
-    }
-
-    final shapeTarget = _nearestShapeTarget(point);
-    if (shapeTarget != null) {
-      return shapeTarget;
-    }
-
-    final annotationTarget = _isLayerLocked(_GraphLayer.findings) &&
-            _isLayerLocked(_GraphLayer.photos)
-        ? null
-        : _nearestAnnotationTarget(point);
-    final freehandTarget = _isLayerLocked(_GraphLayer.structure)
-        ? null
-        : _nearestFreehandTarget(point);
-    final endpointTarget = _isLayerLocked(_GraphLayer.structure)
-        ? null
-        : _nearestEndpointTarget(point);
-
-    final lineTarget = _nearestTarget(freehandTarget, endpointTarget);
-
-    if (annotationTarget == null) {
-      return lineTarget;
-    }
-
-    if (lineTarget == null) {
-      return annotationTarget;
-    }
-
-    return annotationTarget.distance <= lineTarget.distance
-        ? annotationTarget
-        : lineTarget;
+    return switch (selection.kind) {
+      _SelectionKind.annotation => _DragTarget.annotation(
+          annotationIndex: selection.index,
+          distance: _annotations[selection.index].point.distanceTo(point),
+        ),
+      _SelectionKind.shape => _nearestShapeResizeTarget(point) ??
+          _nearestShapeRotationTarget(point) ??
+          _DragTarget.shape(
+            shapeIndex: selection.index,
+            distance: 0,
+            originalPoint: point,
+          ),
+      _SelectionKind.freehand => _DragTarget.freehand(
+          freehandIndex: selection.index,
+          distance: 0,
+          originalPoint: point,
+        ),
+      _SelectionKind.segment => _nearestEndpointTarget(point) ??
+          _DragTarget.segment(
+            segmentIndex: selection.index,
+            distance: _distanceToSegment(point, _wallSegments[selection.index]),
+            originalPoint: point,
+          ),
+    };
   }
 
   _DragTarget? _nearestShapeResizeTarget(GraphPoint point) {
@@ -1744,16 +2031,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     return null;
   }
 
-  _DragTarget? _nearestTarget(_DragTarget? a, _DragTarget? b) {
-    if (a == null) {
-      return b;
-    }
-    if (b == null) {
-      return a;
-    }
-    return a.distance <= b.distance ? a : b;
-  }
-
   _DragTarget? _nearestShapeRotationTarget(GraphPoint point) {
     if (!_isLayerVisible(_GraphLayer.shapes) ||
         _isLayerLocked(_GraphLayer.shapes) ||
@@ -1789,75 +2066,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         point.x - bounds.center.dx,
       ),
       originalRotationDegrees: _shapes[selectedShapeIndex].rotationDegrees,
-    );
-  }
-
-  _DragTarget? _nearestShapeTarget(GraphPoint point) {
-    if (!_isLayerVisible(_GraphLayer.shapes) ||
-        _isLayerLocked(_GraphLayer.shapes) ||
-        _isLayerLocked(_GraphLayer.structure)) {
-      return null;
-    }
-
-    for (var i = _shapes.length - 1; i >= 0; i -= 1) {
-      final shape = _shapes[i];
-      final path = _shapePath(shape);
-      final bounds = path?.getBounds();
-      if (path == null || bounds == null) {
-        continue;
-      }
-
-      final containsPoint = shape.closed
-          ? path.contains(point.offset)
-          : bounds.inflate(12).contains(point.offset);
-      if (!containsPoint) {
-        continue;
-      }
-
-      return _DragTarget.shape(
-        shapeIndex: i,
-        distance: 0,
-        originalPoint: point,
-      );
-    }
-
-    return null;
-  }
-
-  _DragTarget? _nearestAnnotationTarget(GraphPoint point) {
-    _DragTarget? nearestTarget;
-
-    for (var i = _annotations.length - 1; i >= 0; i -= 1) {
-      final annotation = _annotations[i];
-      if (!_isAnnotationVisible(annotation) ||
-          _isAnnotationLocked(annotation)) {
-        continue;
-      }
-
-      final distance = annotation.point.distanceTo(point);
-
-      if (distance <= _dragHitDistance &&
-          (nearestTarget == null || distance < nearestTarget.distance)) {
-        nearestTarget = _DragTarget.annotation(
-          annotationIndex: i,
-          distance: distance,
-        );
-      }
-    }
-
-    return nearestTarget;
-  }
-
-  _DragTarget? _nearestFreehandTarget(GraphPoint point) {
-    final index = _nearestFreehandIndex(point);
-    if (index == null) {
-      return null;
-    }
-
-    return _DragTarget.freehand(
-      freehandIndex: index,
-      distance: _dragHitDistance / 2,
-      originalPoint: point,
     );
   }
 
@@ -1963,7 +2171,30 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       case _DragKind.freehand:
         _moveFreehand(target, point);
         return;
+      case _DragKind.segment:
+        _moveSegment(target, point);
+        return;
     }
+  }
+
+  void _moveSegment(_DragTarget target, GraphPoint point) {
+    final index = target.segmentIndex;
+    final originalPoint = target.originalPoint;
+    final sourceSegments = _dragOriginalWallSegments ?? _wallSegments;
+    if (index == null ||
+        originalPoint == null ||
+        index < 0 ||
+        index >= sourceSegments.length) {
+      return;
+    }
+
+    final delta = point.offset - originalPoint.offset;
+    final nextSegments = <WallSegment>[..._wallSegments];
+    nextSegments[index] = _translateSegment(sourceSegments[index], delta);
+    setState(() {
+      _wallSegments = nextSegments;
+      _dragMoved = true;
+    });
   }
 
   void _moveAnnotation(_DragTarget target, GraphPoint point) {
@@ -2419,6 +2650,38 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     });
   }
 
+  Future<void> _editShapeText(int index) async {
+    if (index < 0 || index >= _shapes.length || _shapes[index].isStructure) {
+      return;
+    }
+    if (_isLayerLocked(_GraphLayer.shapes)) {
+      _showCanvasMessage('Shapes layer is locked');
+      return;
+    }
+
+    final before = _EditorSnapshot.capture(this);
+    final shape = _shapes[index];
+    _interaction.setTextEditing(true);
+    final text = await _showTextLabelDialog(
+      title: 'Edit shape text',
+      initialText: shape.text.isEmpty ? shape.name : shape.text,
+    );
+    _interaction.setTextEditing(false);
+    if (!mounted || text == null || text == shape.text) {
+      return;
+    }
+
+    final nextShapes = <GraphShape>[..._shapes];
+    nextShapes[index] = shape.copyWith(text: text);
+    setState(() {
+      _shapes = nextShapes;
+      _undoStack.add(
+        _UndoEntry(_UndoKind.snapshot, previousSnapshot: before),
+      );
+      _canvasStatus = 'Shape text updated';
+    });
+  }
+
   Future<String?> _showTextLabelDialog({
     required String title,
     required String initialText,
@@ -2497,6 +2760,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     switch (_selectedTool) {
       case CanvasTool.select:
       case CanvasTool.pan:
+      case CanvasTool.structure:
       case CanvasTool.rectangle:
       case CanvasTool.square:
       case CanvasTool.circle:
@@ -2543,6 +2807,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _finishWallPath({bool closeShapeDefault = false}) {
+    if (_selectedTool == CanvasTool.structure) {
+      _finishStructurePath();
+      return;
+    }
     _finishWallPathAsync(closeShapeDefault: closeShapeDefault);
   }
 
@@ -2861,6 +3129,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _applyingHistory = true;
     setState(() {
       switch (undoEntry.kind) {
+        case _UndoKind.snapshot:
+          undoEntry.previousSnapshot?.restore(this);
+          _selection = null;
+          _interaction.setSelected(null);
+          _canvasStatus = 'Action undone';
+          break;
         case _UndoKind.wallStart:
           _activeWallStart = null;
           _activePathStartPoint = null;
@@ -3033,6 +3307,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     setState(() {
       switch (currentSelection.kind) {
         case _SelectionKind.annotation:
@@ -3085,6 +3360,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     const duplicateOffset = Offset(36, 36);
 
+    _recordSnapshotUndo();
     setState(() {
       switch (currentSelection.kind) {
         case _SelectionKind.annotation:
@@ -3179,6 +3455,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     setState(() {
       switch (currentSelection.kind) {
         case _SelectionKind.annotation:
@@ -3608,6 +3885,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextAnnotations = <GraphAnnotation>[..._annotations];
     nextAnnotations[index] = nextAnnotations[index].copyWith(label: label);
 
@@ -3626,6 +3904,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final markerDefault = _markerDefaultsFor(markerType);
     final nextAnnotations = <GraphAnnotation>[..._annotations];
     nextAnnotations[index] = nextAnnotations[index].copyWith(
@@ -3650,6 +3929,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextAnnotations = <GraphAnnotation>[..._annotations];
     nextAnnotations[index] = nextAnnotations[index].copyWith(color: color);
 
@@ -3668,6 +3948,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextAnnotations = <GraphAnnotation>[..._annotations];
     nextAnnotations[index] = nextAnnotations[index].copyWith(size: size);
 
@@ -3686,6 +3967,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextAnnotations = <GraphAnnotation>[..._annotations];
     nextAnnotations[index] = nextAnnotations[index].copyWith(
       rotationDegrees: rotationDegrees,
@@ -3706,6 +3988,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextAnnotations = <GraphAnnotation>[..._annotations];
     nextAnnotations[index] = nextAnnotations[index].copyWith(note: note);
 
@@ -3761,6 +4044,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextAnnotations = <GraphAnnotation>[..._annotations];
     nextAnnotations[index] = nextAnnotations[index].copyWith(
       fontSize: fontSize,
@@ -3792,7 +4076,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         color: annotation.color ?? annotation.markerType.defaultColor,
         size: annotation.size,
       );
-      _selectedMarkerType = annotation.markerType;
+      _interaction.selectMarker(annotation.markerType);
       _selectedMarkerColor =
           annotation.color ?? annotation.markerType.defaultColor;
       _selectedMarkerSize = annotation.size;
@@ -3837,10 +4121,17 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         );
         _canvasStatus = '${preset.label} line style set as default';
       } else {
-        _defaultLineColor = segment.color;
-        _defaultLineWidth = segment.strokeWidth;
-        _defaultLinePattern = segment.pattern;
-        _canvasStatus = 'Line style set as default';
+        if (segment.hasArrow) {
+          _defaultArrowColor = segment.color;
+          _defaultArrowWidth = segment.strokeWidth;
+          _defaultArrowPattern = segment.pattern;
+          _canvasStatus = 'Arrow style set as default';
+        } else {
+          _defaultLineColor = segment.color;
+          _defaultLineWidth = segment.strokeWidth;
+          _defaultLinePattern = segment.pattern;
+          _canvasStatus = 'Line style set as default';
+        }
       }
     });
   }
@@ -3898,6 +4189,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextSegments = <WallSegment>[..._wallSegments];
     nextSegments[index] = nextSegments[index].copyWith(color: color);
     setState(() {
@@ -3915,6 +4207,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextSegments = <WallSegment>[..._wallSegments];
     nextSegments[index] = nextSegments[index].copyWith(pattern: pattern);
     setState(() {
@@ -3932,6 +4225,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextSegments = <WallSegment>[..._wallSegments];
     nextSegments[index] =
         nextSegments[index].copyWith(strokeWidth: strokeWidth);
@@ -3950,6 +4244,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextSegments = <WallSegment>[..._wallSegments];
     nextSegments[index] = nextSegments[index].copyWith(hasArrow: hasArrow);
     setState(() {
@@ -3967,6 +4262,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextStrokes = <FreehandStroke>[..._freehandStrokes];
     nextStrokes[index] = nextStrokes[index].copyWith(color: color);
     setState(() {
@@ -3984,6 +4280,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextStrokes = <FreehandStroke>[..._freehandStrokes];
     nextStrokes[index] = nextStrokes[index].copyWith(strokeWidth: strokeWidth);
     setState(() {
@@ -4001,6 +4298,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextStrokes = <FreehandStroke>[..._freehandStrokes];
     nextStrokes[index] = nextStrokes[index].copyWith(opacity: opacity);
     setState(() {
@@ -4019,6 +4317,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextShapes = <GraphShape>[..._shapes];
     nextShapes[index] = nextShapes[index].copyWith(name: name);
 
@@ -4038,6 +4337,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextShapes = <GraphShape>[..._shapes];
     nextShapes[index] = nextShapes[index].copyWith(
       fillColor: fillColor,
@@ -4091,6 +4391,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextShapes = <GraphShape>[..._shapes];
     nextShapes[index] = nextShapes[index].copyWith(borderColor: borderColor);
 
@@ -4110,6 +4411,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextShapes = <GraphShape>[..._shapes];
     nextShapes[index] = nextShapes[index].copyWith(borderWidth: borderWidth);
 
@@ -4129,6 +4431,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
 
+    _recordSnapshotUndo();
     final nextShapes = <GraphShape>[..._shapes];
     nextShapes[index] = nextShapes[index].copyWith(pattern: pattern);
 
@@ -4136,6 +4439,49 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _shapes = nextShapes;
       _canvasStatus = 'Shape pattern updated';
     });
+  }
+
+  void _recordSnapshotUndo() {
+    if (_applyingHistory) {
+      return;
+    }
+    _undoStack.add(
+      _UndoEntry(
+        _UndoKind.snapshot,
+        previousSnapshot: _EditorSnapshot.capture(this),
+      ),
+    );
+    _redoStack.clear();
+  }
+
+  MouseCursor get _canvasCursor {
+    final hovered = _hoverSelection;
+    if (hovered != null) {
+      return _isSelectionEditable(hovered)
+          ? SystemMouseCursors.move
+          : SystemMouseCursors.click;
+    }
+    if (_interaction.dragging) {
+      return SystemMouseCursors.grabbing;
+    }
+    return switch (_selectedTool) {
+      CanvasTool.pan => SystemMouseCursors.grab,
+      CanvasTool.structure ||
+      CanvasTool.rectangle ||
+      CanvasTool.square ||
+      CanvasTool.circle ||
+      CanvasTool.ellipse ||
+      CanvasTool.triangle ||
+      CanvasTool.wall ||
+      CanvasTool.arrow ||
+      CanvasTool.curve ||
+      CanvasTool.freehand ||
+      CanvasTool.marker ||
+      CanvasTool.photo =>
+        SystemMouseCursors.precise,
+      CanvasTool.text => SystemMouseCursors.text,
+      CanvasTool.select => SystemMouseCursors.basic,
+    };
   }
 
   @override
@@ -4152,7 +4498,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
               : _document.customer.name,
         ),
       ),
-      body: KeyboardListener(
+      body: Focus(
         focusNode: _editorFocusNode,
         autofocus: true,
         onKeyEvent: _handleKeyEvent,
@@ -4167,46 +4513,58 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                       top: 54,
                       right: canvasRightInset,
                       bottom: 12,
-                      child: Listener(
-                        behavior: HitTestBehavior.opaque,
-                        onPointerDown: _handlePointerDown,
-                        onPointerMove: _handlePointerMove,
-                        onPointerHover: _handlePointerHover,
-                        onPointerUp: _handlePointerUp,
-                        onPointerCancel: _handlePointerCancel,
-                        child: InteractiveViewer(
-                          transformationController: _transformationController,
-                          panEnabled: _selectedTool == CanvasTool.pan,
-                          scaleEnabled: true,
-                          constrained: false,
-                          minScale: 0.25,
-                          maxScale: 4,
-                          boundaryMargin: const EdgeInsets.all(1200),
-                          child: _CanvasSurface(
-                            canvasSize: _canvasSize,
-                            wallSegments: _wallSegments,
-                            annotations: _annotations,
-                            shapes: _shapes,
-                            freehandStrokes: _freehandStrokes,
-                            draftFreehandPoints: _draftFreehandPoints,
-                            previewShapeSegments: _previewShapeSegments,
-                            previewShape: _previewShape,
-                            hiddenSegmentIndexes: _shapeSegmentIndexSet,
-                            gridVisible: _gridVisible,
-                            selectedSegmentIndex: _selection?.segmentIndex,
-                            selectedAnnotationIndex:
-                                _selection?.annotationIndex,
-                            selectedShapeIndex: _selection?.shapeIndex,
-                            selectedFreehandIndex: _selection?.freehandIndex,
-                            activeWallStart: _activeWallStart,
-                            previewSegment: _previewSegment,
-                            structureVisible:
-                                _isLayerVisible(_GraphLayer.structure),
-                            shapesVisible: _isLayerVisible(_GraphLayer.shapes),
-                            findingsVisible:
-                                _isLayerVisible(_GraphLayer.findings),
-                            photosVisible: _isLayerVisible(_GraphLayer.photos),
-                            traceLayerVisible: _traceLayerVisible,
+                      child: MouseRegion(
+                        cursor: _canvasCursor,
+                        child: Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: _handlePointerDown,
+                          onPointerMove: _handlePointerMove,
+                          onPointerHover: _handlePointerHover,
+                          onPointerUp: _handlePointerUp,
+                          onPointerCancel: _handlePointerCancel,
+                          child: InteractiveViewer(
+                            transformationController: _transformationController,
+                            panEnabled: _selectedTool == CanvasTool.pan,
+                            scaleEnabled: true,
+                            constrained: false,
+                            minScale: 0.25,
+                            maxScale: 4,
+                            boundaryMargin: const EdgeInsets.all(1200),
+                            child: _CanvasSurface(
+                              canvasSize: _canvasSize,
+                              wallSegments: _wallSegments,
+                              annotations: _annotations,
+                              shapes: _shapes,
+                              freehandStrokes: _freehandStrokes,
+                              draftFreehandPoints: _draftFreehandPoints,
+                              previewShapeSegments: _previewShapeSegments,
+                              previewShape: _previewShape,
+                              hiddenSegmentIndexes: _shapeSegmentIndexSet,
+                              gridVisible: _gridVisible,
+                              selectedSegmentIndex: _selection?.segmentIndex,
+                              selectedAnnotationIndex:
+                                  _selection?.annotationIndex,
+                              selectedShapeIndex: _selection?.shapeIndex,
+                              selectedFreehandIndex: _selection?.freehandIndex,
+                              hoveredSegmentIndex:
+                                  _hoverSelection?.segmentIndex,
+                              hoveredAnnotationIndex:
+                                  _hoverSelection?.annotationIndex,
+                              hoveredShapeIndex: _hoverSelection?.shapeIndex,
+                              hoveredFreehandIndex:
+                                  _hoverSelection?.freehandIndex,
+                              activeWallStart: _activeWallStart,
+                              previewSegment: _previewSegment,
+                              structureVisible:
+                                  _isLayerVisible(_GraphLayer.structure),
+                              shapesVisible:
+                                  _isLayerVisible(_GraphLayer.shapes),
+                              findingsVisible:
+                                  _isLayerVisible(_GraphLayer.findings),
+                              photosVisible:
+                                  _isLayerVisible(_GraphLayer.photos),
+                              traceLayerVisible: _traceLayerVisible,
+                            ),
                           ),
                         ),
                       ),
@@ -4219,7 +4577,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                       child: CanvasToolbar(
                         selectedTool: _selectedTool,
                         selectedMarkerType: _selectedMarkerType,
-                        selectedDrawingPreset: _selectedDrawingPreset,
+                        selectedDrawingPreset: _selectedStructureType,
                         onToolSelected: _selectTool,
                         onMarkerSelected: _selectMarker,
                         onDrawingPresetSelected: _selectDrawingPreset,
@@ -5412,11 +5770,16 @@ class _InspectorValue extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Text(
-          value,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
+        Flexible(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
         ),
       ],
     );
@@ -5711,6 +6074,10 @@ class _CanvasSurface extends StatelessWidget {
     required this.selectedAnnotationIndex,
     required this.selectedShapeIndex,
     required this.selectedFreehandIndex,
+    required this.hoveredSegmentIndex,
+    required this.hoveredAnnotationIndex,
+    required this.hoveredShapeIndex,
+    required this.hoveredFreehandIndex,
     required this.activeWallStart,
     required this.previewSegment,
     required this.structureVisible,
@@ -5734,6 +6101,10 @@ class _CanvasSurface extends StatelessWidget {
   final int? selectedAnnotationIndex;
   final int? selectedShapeIndex;
   final int? selectedFreehandIndex;
+  final int? hoveredSegmentIndex;
+  final int? hoveredAnnotationIndex;
+  final int? hoveredShapeIndex;
+  final int? hoveredFreehandIndex;
   final GraphPoint? activeWallStart;
   final WallSegment? previewSegment;
   final bool structureVisible;
@@ -5760,6 +6131,10 @@ class _CanvasSurface extends StatelessWidget {
         selectedAnnotationIndex: selectedAnnotationIndex,
         selectedShapeIndex: selectedShapeIndex,
         selectedFreehandIndex: selectedFreehandIndex,
+        hoveredSegmentIndex: hoveredSegmentIndex,
+        hoveredAnnotationIndex: hoveredAnnotationIndex,
+        hoveredShapeIndex: hoveredShapeIndex,
+        hoveredFreehandIndex: hoveredFreehandIndex,
         activeWallStart: activeWallStart,
         previewSegment: previewSegment,
         structureVisible: structureVisible,
@@ -5790,6 +6165,10 @@ class _GraphOverlayPainter extends CustomPainter {
     required this.selectedAnnotationIndex,
     required this.selectedShapeIndex,
     required this.selectedFreehandIndex,
+    required this.hoveredSegmentIndex,
+    required this.hoveredAnnotationIndex,
+    required this.hoveredShapeIndex,
+    required this.hoveredFreehandIndex,
     required this.activeWallStart,
     required this.previewSegment,
     required this.structureVisible,
@@ -5810,6 +6189,10 @@ class _GraphOverlayPainter extends CustomPainter {
   final int? selectedAnnotationIndex;
   final int? selectedShapeIndex;
   final int? selectedFreehandIndex;
+  final int? hoveredSegmentIndex;
+  final int? hoveredAnnotationIndex;
+  final int? hoveredShapeIndex;
+  final int? hoveredFreehandIndex;
   final GraphPoint? activeWallStart;
   final WallSegment? previewSegment;
   final bool structureVisible;
@@ -5824,6 +6207,7 @@ class _GraphOverlayPainter extends CustomPainter {
         shapes: shapes,
         segments: wallSegments,
         selectedShapeIndex: selectedShapeIndex,
+        hoveredShapeIndex: hoveredShapeIndex,
       ).paint(
         canvas,
         size,
@@ -5833,6 +6217,7 @@ class _GraphOverlayPainter extends CustomPainter {
       WallSegmentsPainter(
         segments: wallSegments,
         selectedSegmentIndex: selectedSegmentIndex,
+        hoveredSegmentIndex: hoveredSegmentIndex,
         activeWallStart: activeWallStart,
         previewSegment: previewSegment,
         hiddenSegmentIndexes: hiddenSegmentIndexes,
@@ -5843,17 +6228,20 @@ class _GraphOverlayPainter extends CustomPainter {
           shapes: [shapePreview],
           segments: previewShapeSegments,
           selectedShapeIndex: null,
+          hoveredShapeIndex: null,
         ).paint(canvas, size);
       }
       FreehandStrokesPainter(
         strokes: freehandStrokes,
         draftPoints: draftFreehandPoints,
         selectedStrokeIndex: selectedFreehandIndex,
+        hoveredStrokeIndex: hoveredFreehandIndex,
       ).paint(canvas, size);
     }
     GraphAnnotationsPainter(
       annotations: annotations,
       selectedAnnotationIndex: selectedAnnotationIndex,
+      hoveredAnnotationIndex: hoveredAnnotationIndex,
       findingsVisible: findingsVisible,
       photosVisible: photosVisible,
     ).paint(canvas, size);
@@ -5873,6 +6261,10 @@ class _GraphOverlayPainter extends CustomPainter {
         oldDelegate.selectedAnnotationIndex != selectedAnnotationIndex ||
         oldDelegate.selectedShapeIndex != selectedShapeIndex ||
         oldDelegate.selectedFreehandIndex != selectedFreehandIndex ||
+        oldDelegate.hoveredSegmentIndex != hoveredSegmentIndex ||
+        oldDelegate.hoveredAnnotationIndex != hoveredAnnotationIndex ||
+        oldDelegate.hoveredShapeIndex != hoveredShapeIndex ||
+        oldDelegate.hoveredFreehandIndex != hoveredFreehandIndex ||
         oldDelegate.activeWallStart != activeWallStart ||
         oldDelegate.previewSegment != previewSegment ||
         oldDelegate.structureVisible != structureVisible ||
@@ -5911,6 +6303,7 @@ class _TraceLayer extends StatelessWidget {
 }
 
 enum _UndoKind {
+  snapshot,
   wallStart,
   wallSegment,
   annotation,
@@ -6102,6 +6495,13 @@ class _Selection {
   int? get shapeIndex => kind == _SelectionKind.shape ? index : null;
 
   int? get freehandIndex => kind == _SelectionKind.freehand ? index : null;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _Selection && other.kind == kind && other.index == index;
+
+  @override
+  int get hashCode => Object.hash(kind, index);
 }
 
 class _EditorSnapshot {
@@ -6160,6 +6560,7 @@ class _RedoEntry {
 class _UndoEntry {
   const _UndoEntry(
     this.kind, {
+    this.previousSnapshot,
     this.annotationIndex,
     this.previousAnnotation,
     this.previousWallSegments,
@@ -6174,6 +6575,7 @@ class _UndoEntry {
   });
 
   final _UndoKind kind;
+  final _EditorSnapshot? previousSnapshot;
   final int? annotationIndex;
   final GraphAnnotation? previousAnnotation;
   final List<WallSegment>? previousWallSegments;
@@ -6189,6 +6591,7 @@ class _UndoEntry {
 
 enum _DragKind {
   wallEndpoint,
+  segment,
   annotation,
   shape,
   shapeResize,
@@ -6201,6 +6604,7 @@ class _DragTarget {
     required this.kind,
     required this.distance,
     this.annotationIndex,
+    this.segmentIndex,
     this.shapeIndex,
     this.freehandIndex,
     this.endpointRefs = const <_SegmentEndpointRef>[],
@@ -6224,6 +6628,20 @@ class _DragTarget {
       annotationIndex: annotationIndex,
       distance: distance,
       selection: _Selection.annotation(annotationIndex),
+    );
+  }
+
+  factory _DragTarget.segment({
+    required int segmentIndex,
+    required double distance,
+    required GraphPoint originalPoint,
+  }) {
+    return _DragTarget._(
+      kind: _DragKind.segment,
+      segmentIndex: segmentIndex,
+      distance: distance,
+      originalPoint: originalPoint,
+      selection: _Selection.segment(segmentIndex),
     );
   }
 
@@ -6316,6 +6734,7 @@ class _DragTarget {
   final _DragKind kind;
   final double distance;
   final int? annotationIndex;
+  final int? segmentIndex;
   final int? shapeIndex;
   final int? freehandIndex;
   final List<_SegmentEndpointRef> endpointRefs;

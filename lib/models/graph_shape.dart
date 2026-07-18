@@ -110,6 +110,19 @@ enum GraphDrawingPreset {
     5,
     LinePatternValue.solid,
   ),
+  dirtArea(
+    'Dirt Area',
+    'DIRT',
+    GraphDrawingPresetKind.area,
+    Color(0xFFC58D5A),
+    0.30,
+    Color(0xFF6A4328),
+    3,
+    GraphShapePattern.dots,
+    Color(0xFF6A4328),
+    5,
+    LinePatternValue.solid,
+  ),
   garage(
     'Garage',
     'GAR',
@@ -224,6 +237,8 @@ class GraphShape {
     required this.closed,
     required this.rotationDegrees,
     this.preset,
+    this.text = '',
+    this.extraProperties = const <String, Object?>{},
   });
 
   final String name;
@@ -236,6 +251,10 @@ class GraphShape {
   final bool closed;
   final double rotationDegrees;
   final GraphDrawingPreset? preset;
+  final String text;
+  final Map<String, Object?> extraProperties;
+
+  bool get isStructure => preset != null;
 
   GraphShape copyWith({
     String? name,
@@ -250,6 +269,8 @@ class GraphShape {
     double? rotationDegrees,
     GraphDrawingPreset? preset,
     bool clearPreset = false,
+    String? text,
+    Map<String, Object?>? extraProperties,
   }) {
     return GraphShape(
       name: name ?? this.name,
@@ -262,6 +283,8 @@ class GraphShape {
       closed: closed ?? this.closed,
       rotationDegrees: rotationDegrees ?? this.rotationDegrees,
       preset: clearPreset ? null : preset ?? this.preset,
+      text: text ?? this.text,
+      extraProperties: extraProperties ?? this.extraProperties,
     );
   }
 }

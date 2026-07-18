@@ -1,30 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../editor/editor_interaction_controller.dart';
 import '../models/graph_annotation.dart';
 import '../models/graph_shape.dart';
-
-enum CanvasTool {
-  select(Icons.mouse_outlined, 'Select', 'V'),
-  pan(Icons.pan_tool_alt_outlined, 'Pan', 'H'),
-  rectangle(Icons.crop_square, 'Rect', 'R'),
-  square(Icons.check_box_outline_blank, 'Square', 'S'),
-  circle(Icons.circle_outlined, 'Circle', 'C'),
-  ellipse(Icons.radio_button_unchecked, 'Ellipse', 'E'),
-  triangle(Icons.change_history, 'Tri', 'G'),
-  wall(Icons.polyline_outlined, 'Line', 'L'),
-  arrow(Icons.arrow_forward, 'Arrow', 'A'),
-  curve(Icons.timeline, 'Curve', 'U'),
-  freehand(Icons.gesture, 'Draw', 'F'),
-  marker(Icons.place_outlined, 'Marker', 'M'),
-  photo(Icons.add_a_photo_outlined, 'Photo', 'P'),
-  text(Icons.text_fields, 'Text', 'T');
-
-  const CanvasTool(this.icon, this.label, this.shortcut);
-
-  final IconData icon;
-  final String label;
-  final String shortcut;
-}
 
 class CanvasToolbar extends StatelessWidget {
   const CanvasToolbar({
@@ -77,14 +55,15 @@ class CanvasToolbar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
               ],
-              for (final preset in GraphDrawingPreset.values) ...[
-                _DrawingPresetButton(
-                  preset: preset,
-                  selected: selectedDrawingPreset == preset,
-                  onPressed: () => onDrawingPresetSelected(preset),
-                ),
-                const SizedBox(height: 8),
-              ],
+              const Divider(height: 18),
+              const _ToolbarGroupLabel(label: 'Structures'),
+              _StructurePickerButton(
+                selectedPreset:
+                    selectedDrawingPreset ?? GraphDrawingPreset.mainStructure,
+                active: selectedTool == CanvasTool.structure,
+                onSelected: onDrawingPresetSelected,
+              ),
+              const SizedBox(height: 8),
               const Divider(height: 18),
               const _ToolbarGroupLabel(label: 'Shapes'),
               for (final tool in const [
@@ -104,27 +83,13 @@ class CanvasToolbar extends StatelessWidget {
                 const SizedBox(height: 8),
               ],
               const Divider(height: 18),
-              const _ToolbarGroupLabel(label: 'Inspection\nMarkers'),
-              for (final markerType in _inspectionMarkerTypes) ...[
-                _MarkerToolButton(
-                  markerType: markerType,
-                  selected: selectedTool == CanvasTool.marker &&
-                      selectedMarkerType == markerType,
-                  onPressed: () => onMarkerSelected(markerType),
-                ),
-                const SizedBox(height: 8),
-              ],
-              const Divider(height: 18),
-              const _ToolbarGroupLabel(label: 'Treatment\nMarkers'),
-              for (final markerType in _treatmentMarkerTypes) ...[
-                _MarkerToolButton(
-                  markerType: markerType,
-                  selected: selectedTool == CanvasTool.marker &&
-                      selectedMarkerType == markerType,
-                  onPressed: () => onMarkerSelected(markerType),
-                ),
-                const SizedBox(height: 8),
-              ],
+              const _ToolbarGroupLabel(label: 'Markers'),
+              _MarkerPickerButton(
+                selectedMarker: selectedMarkerType,
+                active: selectedTool == CanvasTool.marker,
+                onSelected: onMarkerSelected,
+              ),
+              const SizedBox(height: 8),
               const Divider(height: 18),
               const _ToolbarGroupLabel(label: 'Review'),
               for (final tool in const [
@@ -140,20 +105,21 @@ class CanvasToolbar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
               ],
-              for (final markerType in const [
-                GraphMarkerType.notePoint,
-                GraphMarkerType.photoPoint,
-                GraphMarkerType.camera,
-                GraphMarkerType.recommendationPoint,
-              ]) ...[
-                _MarkerToolButton(
-                  markerType: markerType,
-                  selected: selectedTool == CanvasTool.marker &&
-                      selectedMarkerType == markerType,
-                  onPressed: () => onMarkerSelected(markerType),
-                ),
-                const SizedBox(height: 8),
-              ],
+              _QuickReviewButton(
+                markerType: GraphMarkerType.treatmentNote,
+                selected: selectedTool == CanvasTool.marker &&
+                    selectedMarkerType == GraphMarkerType.treatmentNote,
+                onPressed: () =>
+                    onMarkerSelected(GraphMarkerType.treatmentNote),
+              ),
+              const SizedBox(height: 8),
+              _QuickReviewButton(
+                markerType: GraphMarkerType.notePoint,
+                selected: selectedTool == CanvasTool.marker &&
+                    selectedMarkerType == GraphMarkerType.notePoint,
+                onPressed: () => onMarkerSelected(GraphMarkerType.notePoint),
+              ),
+              const SizedBox(height: 8),
               const Divider(height: 18),
               _ToolButton(
                 icon: traceLayerVisible ? Icons.layers : Icons.layers_outlined,
@@ -170,104 +136,212 @@ class CanvasToolbar extends StatelessWidget {
   }
 }
 
-const List<GraphMarkerType> _inspectionMarkerTypes = [
-  GraphMarkerType.termiteActivity,
-  GraphMarkerType.activeTermites,
-  GraphMarkerType.termiteDamage,
-  GraphMarkerType.moisture,
-  GraphMarkerType.standingWater,
-  GraphMarkerType.conduciveCondition,
-  GraphMarkerType.crawlspaceIssue,
-  GraphMarkerType.plumbingLeak,
-  GraphMarkerType.hvacCondensation,
-  GraphMarkerType.insulationIssue,
-  GraphMarkerType.woodDecay,
-  GraphMarkerType.accessPoint,
-  GraphMarkerType.entryPoint,
-  GraphMarkerType.rodentActivity,
-  GraphMarkerType.generalPestActivity,
-  GraphMarkerType.oldDamage,
-  GraphMarkerType.oldTermiteActivity,
-  GraphMarkerType.damage,
-  GraphMarkerType.woodFungi,
-  GraphMarkerType.oldHouseBorers,
-  GraphMarkerType.powderPostBeetles,
-];
-
-const List<GraphMarkerType> _treatmentMarkerTypes = [
-  GraphMarkerType.treatmentArea,
-  GraphMarkerType.baitStation,
-  GraphMarkerType.treatmentNote,
-  GraphMarkerType.circle,
-  GraphMarkerType.triangle,
-  GraphMarkerType.square,
-];
-
-class _DrawingPresetButton extends StatelessWidget {
-  const _DrawingPresetButton({
-    required this.preset,
-    required this.selected,
-    required this.onPressed,
+class _StructurePickerButton extends StatelessWidget {
+  const _StructurePickerButton({
+    required this.selectedPreset,
+    required this.active,
+    required this.onSelected,
   });
 
-  final GraphDrawingPreset preset;
-  final bool selected;
-  final VoidCallback onPressed;
+  final GraphDrawingPreset selectedPreset;
+  final bool active;
+  final ValueChanged<GraphDrawingPreset> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final color = preset.kind == GraphDrawingPresetKind.line
-        ? preset.defaultLineColor
-        : preset.defaultBorderColor;
-
     return SizedBox(
       width: 56,
-      height: 58,
-      child: Tooltip(
-        message: preset.label,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onPressed,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: selected
-                  ? color.withValues(alpha: 0.16)
-                  : colorScheme.surface,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: selected ? color : const Color(0xFFE3E0D8),
-                width: selected ? 2 : 1,
+      height: 62,
+      child: PopupMenuButton<GraphDrawingPreset>(
+        tooltip: 'Draw Structure: ${selectedPreset.label}',
+        onSelected: onSelected,
+        constraints: const BoxConstraints(minWidth: 300, maxWidth: 340),
+        itemBuilder: (context) => [
+          for (final preset in GraphDrawingPreset.values)
+            PopupMenuItem(
+              value: preset,
+              child: Row(
+                children: [
+                  _StructureSwatch(preset: preset),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      preset.label,
+                      style: TextStyle(
+                        fontWeight: preset == selectedPreset
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (preset == selectedPreset)
+                    const Icon(Icons.check, size: 20),
+                ],
               ),
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  _iconForPreset(preset),
-                  size: 22,
-                  color: color,
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  preset.shortLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: selected ? color : colorScheme.primary,
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-              ],
-            ),
-          ),
+        ],
+        child: _PickerFace(
+          icon: Icons.account_tree_outlined,
+          label: selectedPreset.shortLabel,
+          color: selectedPreset.defaultBorderColor,
+          active: active,
         ),
       ),
     );
   }
+}
 
-  IconData _iconForPreset(GraphDrawingPreset preset) {
-    return switch (preset) {
+class _StructureSwatch extends StatelessWidget {
+  const _StructureSwatch({required this.preset});
+  final GraphDrawingPreset preset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 44,
+      height: 34,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: preset.defaultFillColor?.withValues(
+              alpha: preset.defaultFillOpacity,
+            ) ??
+            Colors.white,
+        border: Border.all(
+          color: preset.defaultBorderColor,
+          width: preset.defaultBorderWidth.clamp(1, 4),
+        ),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: preset.defaultPattern == GraphShapePattern.none
+          ? Icon(_iconForPreset(preset), size: 18)
+          : const Icon(Icons.texture, size: 18),
+    );
+  }
+}
+
+class _MarkerPickerButton extends StatelessWidget {
+  const _MarkerPickerButton({
+    required this.selectedMarker,
+    required this.active,
+    required this.onSelected,
+  });
+
+  final GraphMarkerType selectedMarker;
+  final bool active;
+  final ValueChanged<GraphMarkerType> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 56,
+      height: 62,
+      child: PopupMenuButton<GraphMarkerType>(
+        tooltip: 'Marker: ${selectedMarker.label}',
+        onSelected: onSelected,
+        constraints: const BoxConstraints(minWidth: 320, maxWidth: 360),
+        itemBuilder: (context) => [
+          for (final category in GraphMarkerCategory.values) ...[
+            PopupMenuItem<GraphMarkerType>(
+              enabled: false,
+              height: 34,
+              child: Text(
+                category.label,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            for (final marker in GraphMarkerType.values
+                .where((item) => item.category == category))
+              PopupMenuItem(
+                value: marker,
+                child: Row(
+                  children: [
+                    Icon(
+                      _iconForMarker(marker),
+                      color: marker.defaultColor,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(marker.label)),
+                    if (marker == selectedMarker)
+                      const Icon(Icons.check, size: 20),
+                  ],
+                ),
+              ),
+          ],
+        ],
+        child: _PickerFace(
+          icon: _iconForMarker(selectedMarker),
+          label: selectedMarker.shortLabel,
+          color: selectedMarker.defaultColor,
+          active: active,
+        ),
+      ),
+    );
+  }
+}
+
+class _PickerFace extends StatelessWidget {
+  const _PickerFace({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.active,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: active ? color.withValues(alpha: 0.18) : Colors.white,
+        border: Border.all(color: active ? color : const Color(0xFFE3E0D8)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 22, color: color),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickReviewButton extends StatelessWidget {
+  const _QuickReviewButton({
+    required this.markerType,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final GraphMarkerType markerType;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => _MarkerToolButton(
+        markerType: markerType,
+        selected: selected,
+        onPressed: onPressed,
+      );
+}
+
+IconData _iconForPreset(GraphDrawingPreset preset) => switch (preset) {
       GraphDrawingPreset.mainStructure => Icons.home_work_outlined,
       GraphDrawingPreset.slab => Icons.grid_on,
       GraphDrawingPreset.crawlspace => Icons.foundation_outlined,
@@ -275,14 +349,48 @@ class _DrawingPresetButton extends StatelessWidget {
       GraphDrawingPreset.woodDeck => Icons.deck_outlined,
       GraphDrawingPreset.openPorch => Icons.meeting_room_outlined,
       GraphDrawingPreset.dirtFilledPorch => Icons.terrain_outlined,
+      GraphDrawingPreset.dirtArea => Icons.landscape_outlined,
       GraphDrawingPreset.garage => Icons.garage_outlined,
       GraphDrawingPreset.detachedStructure => Icons.other_houses_outlined,
       GraphDrawingPreset.propertyLine => Icons.border_style,
       GraphDrawingPreset.fenceLine => Icons.fence,
       GraphDrawingPreset.measurementLine => Icons.straighten,
     };
-  }
-}
+
+IconData _iconForMarker(GraphMarkerType marker) => switch (marker.symbol) {
+      GraphMarkerSymbol.termite => Icons.pest_control_outlined,
+      GraphMarkerSymbol.damage => Icons.handyman_outlined,
+      GraphMarkerSymbol.mudTube => Icons.route_outlined,
+      GraphMarkerSymbol.insect => Icons.bug_report_outlined,
+      GraphMarkerSymbol.rodent => Icons.pets_outlined,
+      GraphMarkerSymbol.moisture => Icons.water_drop_outlined,
+      GraphMarkerSymbol.water => Icons.water_outlined,
+      GraphMarkerSymbol.leak => Icons.plumbing_outlined,
+      GraphMarkerSymbol.fungi => Icons.grass_outlined,
+      GraphMarkerSymbol.crack => Icons.warning_amber_outlined,
+      GraphMarkerSymbol.penetration => Icons.adjust_outlined,
+      GraphMarkerSymbol.access => Icons.meeting_room_outlined,
+      GraphMarkerSymbol.vent => Icons.air_outlined,
+      GraphMarkerSymbol.door => Icons.door_front_door_outlined,
+      GraphMarkerSymbol.window => Icons.window_outlined,
+      GraphMarkerSymbol.steps => Icons.stairs_outlined,
+      GraphMarkerSymbol.hvac => Icons.ac_unit_outlined,
+      GraphMarkerSymbol.utility => Icons.cable_outlined,
+      GraphMarkerSymbol.support => Icons.foundation_outlined,
+      GraphMarkerSymbol.drillVertical => Icons.south_outlined,
+      GraphMarkerSymbol.drillHorizontal => Icons.east_outlined,
+      GraphMarkerSymbol.trench => Icons.linear_scale_outlined,
+      GraphMarkerSymbol.injection => Icons.colorize_outlined,
+      GraphMarkerSymbol.foam => Icons.bubble_chart_outlined,
+      GraphMarkerSymbol.treatment => Icons.science_outlined,
+      GraphMarkerSymbol.bait => Icons.location_on_outlined,
+      GraphMarkerSymbol.dust => Icons.blur_on_outlined,
+      GraphMarkerSymbol.exclusion => Icons.block_outlined,
+      GraphMarkerSymbol.camera => Icons.photo_camera_outlined,
+      GraphMarkerSymbol.note => Icons.note_alt_outlined,
+      GraphMarkerSymbol.alert => Icons.report_problem_outlined,
+      GraphMarkerSymbol.generic => Icons.place_outlined,
+    };
 
 class _ToolbarGroupLabel extends StatelessWidget {
   const _ToolbarGroupLabel({required this.label});

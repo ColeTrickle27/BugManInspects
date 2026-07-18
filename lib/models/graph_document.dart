@@ -23,6 +23,7 @@ class GraphDocument extends ChangeNotifier {
     Map<String, GraphLayerState>? layers,
     List<GraphAttachment> attachments = const <GraphAttachment>[],
     Map<String, Object?> metadata = const <String, Object?>{},
+    Map<String, Object?> extraProperties = const <String, Object?>{},
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : _wallSegments = List<WallSegment>.of(wallSegments),
@@ -35,6 +36,7 @@ class GraphDocument extends ChangeNotifier {
         },
         _attachments = List<GraphAttachment>.of(attachments),
         _metadata = Map<String, Object?>.of(metadata),
+        _extraProperties = Map<String, Object?>.of(extraProperties),
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? createdAt ?? DateTime.now();
 
@@ -75,12 +77,27 @@ class GraphDocument extends ChangeNotifier {
           .map((value) => GraphAttachment.fromJson(_map(value)))
           .toList(),
       metadata: _map(json['metadata']),
+      extraProperties: _unknownFields(json, const {
+        'schemaVersion',
+        'customer',
+        'job',
+        'graphObjects',
+        'wallSegments',
+        'annotations',
+        'shapes',
+        'freehandStrokes',
+        'layers',
+        'attachments',
+        'metadata',
+        'createdAt',
+        'updatedAt',
+      }),
       createdAt: _date(json['createdAt']),
       updatedAt: _date(json['updatedAt']),
     )..markClean();
   }
 
-  static const int schemaVersion = 1;
+  static const int schemaVersion = 2;
 
   static const Map<String, GraphLayerState> defaultLayers = {
     'structure': GraphLayerState(),
@@ -101,6 +118,7 @@ class GraphDocument extends ChangeNotifier {
   Map<String, GraphLayerState> _layers;
   List<GraphAttachment> _attachments;
   Map<String, Object?> _metadata;
+  Map<String, Object?> _extraProperties;
   bool _isDirty = false;
   int _revision = 0;
 
@@ -117,6 +135,8 @@ class GraphDocument extends ChangeNotifier {
       UnmodifiableListView(_attachments);
   UnmodifiableMapView<String, Object?> get metadata =>
       UnmodifiableMapView(_metadata);
+  UnmodifiableMapView<String, Object?> get extraProperties =>
+      UnmodifiableMapView(_extraProperties);
 
   List<GraphAnnotation> get photos => _annotations
       .where((item) => item.kind == GraphAnnotationKind.photo)
@@ -176,6 +196,7 @@ class GraphDocument extends ChangeNotifier {
   }
 
   Map<String, Object?> toJson() => {
+        ..._extraProperties,
         'schemaVersion': schemaVersion,
         'customer': customer.toJson(),
         'graphObjects': {
@@ -285,6 +306,14 @@ Map<String, Object?> _map(Object? value) {
   return const <String, Object?>{};
 }
 
+Map<String, Object?> _unknownFields(
+  Map<String, Object?> source,
+  Set<String> knownKeys,
+) =>
+    Map<String, Object?>.fromEntries(
+      source.entries.where((entry) => !knownKeys.contains(entry.key)),
+    );
+
 List<Object?> _list(Object? value) => value is List ? value : const [];
 String _string(Object? value) => value?.toString() ?? '';
 double _double(Object? value, [double fallback = 0]) =>
@@ -329,6 +358,7 @@ WallSegment _wallSegmentFromJson(Map<String, Object?> json) => WallSegment(
     );
 
 Map<String, Object?> _annotationToJson(GraphAnnotation item) => {
+      ...item.extraProperties,
       'kind': item.kind.name,
       'point': _pointToJson(item.point),
       'label': item.label,
@@ -371,9 +401,26 @@ GraphAnnotation _annotationFromJson(Map<String, Object?> json) =>
       backgroundColor:
           _readColor(json['backgroundColor'], const Color(0xFFFFF2B8)),
       borderColor: _readColor(json['borderColor'], const Color(0xFFC7A93C)),
+      extraProperties: _unknownFields(json, const {
+        'kind',
+        'point',
+        'label',
+        'markerType',
+        'color',
+        'size',
+        'rotationDegrees',
+        'note',
+        'fontSize',
+        'bold',
+        'italic',
+        'textColor',
+        'backgroundColor',
+        'borderColor',
+      }),
     );
 
 Map<String, Object?> _shapeToJson(GraphShape item) => {
+      ...item.extraProperties,
       'name': item.name,
       'segmentIndexes': item.segmentIndexes,
       'fillColor': item.fillColor == null ? null : _color(item.fillColor!),
@@ -384,6 +431,7 @@ Map<String, Object?> _shapeToJson(GraphShape item) => {
       'closed': item.closed,
       'rotationDegrees': item.rotationDegrees,
       'preset': item.preset?.name,
+      'text': item.text,
     };
 GraphShape _shapeFromJson(Map<String, Object?> json) => GraphShape(
       name: _string(json['name']),
@@ -411,6 +459,20 @@ GraphShape _shapeFromJson(Map<String, Object?> json) => GraphShape(
               json['preset'],
               GraphDrawingPreset.mainStructure,
             ),
+      text: _string(json['text']),
+      extraProperties: _unknownFields(json, const {
+        'name',
+        'segmentIndexes',
+        'fillColor',
+        'fillOpacity',
+        'borderColor',
+        'borderWidth',
+        'pattern',
+        'closed',
+        'rotationDegrees',
+        'preset',
+        'text',
+      }),
     );
 
 Map<String, Object?> _freehandToJson(FreehandStroke item) => {

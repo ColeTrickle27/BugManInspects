@@ -9,6 +9,7 @@ class WallSegmentsPainter extends CustomPainter {
   const WallSegmentsPainter({
     required this.segments,
     required this.selectedSegmentIndex,
+    this.hoveredSegmentIndex,
     required this.activeWallStart,
     required this.previewSegment,
     this.drawMeasurements = true,
@@ -17,6 +18,7 @@ class WallSegmentsPainter extends CustomPainter {
 
   final List<WallSegment> segments;
   final int? selectedSegmentIndex;
+  final int? hoveredSegmentIndex;
   final GraphPoint? activeWallStart;
   final WallSegment? previewSegment;
   final bool drawMeasurements;
@@ -26,6 +28,7 @@ class WallSegmentsPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final wallOutlinePaint = Paint()
       ..color = Colors.white
+      ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 9;
     for (var i = 0; i < segments.length; i += 1) {
@@ -34,14 +37,25 @@ class WallSegmentsPainter extends CustomPainter {
       }
 
       final segment = segments[i];
-      final curvePath = _pathForSegment(segment);
+      final curvePath = buildWallSegmentPath(segment);
       final wallPaint = Paint()
         ..color = segment.color
+        ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..strokeWidth = segment.strokeWidth;
 
       canvas.drawPath(curvePath, wallOutlinePaint);
+      if (i == hoveredSegmentIndex && i != selectedSegmentIndex) {
+        canvas.drawPath(
+          curvePath,
+          Paint()
+            ..color = const Color(0xFF2F80ED).withValues(alpha: 0.42)
+            ..style = PaintingStyle.stroke
+            ..strokeCap = StrokeCap.round
+            ..strokeWidth = segment.strokeWidth + 8,
+        );
+      }
       _drawPatternedPath(canvas, curvePath, segment, wallPaint);
       if (segment.hasArrow) {
         _drawArrowHead(canvas, segment, wallPaint);
@@ -83,7 +97,7 @@ class WallSegmentsPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
 
-    canvas.drawPath(_pathForSegment(segment), selectedPaint);
+    canvas.drawPath(buildWallSegmentPath(segment), selectedPaint);
     _drawSelectionHandle(canvas, segment.start.offset);
     _drawSelectionHandle(canvas, segment.end.offset);
 
@@ -133,7 +147,7 @@ class WallSegmentsPainter extends CustomPainter {
     final vector = end - start;
     final length = vector.distance;
     if (length == 0 || segment.isCurve) {
-      canvas.drawPath(_pathForSegment(segment), paint);
+      canvas.drawPath(buildWallSegmentPath(segment), paint);
       return;
     }
 
@@ -162,7 +176,7 @@ class WallSegmentsPainter extends CustomPainter {
     final vector = end - start;
     final length = vector.distance;
     if (length == 0 || segment.isCurve) {
-      canvas.drawPath(_pathForSegment(segment), paint);
+      canvas.drawPath(buildWallSegmentPath(segment), paint);
       return;
     }
 
@@ -183,7 +197,7 @@ class WallSegmentsPainter extends CustomPainter {
     final vector = end - start;
     final length = vector.distance;
     if (length == 0 || segment.isCurve) {
-      canvas.drawPath(_pathForSegment(segment), paint);
+      canvas.drawPath(buildWallSegmentPath(segment), paint);
       return;
     }
 
@@ -218,7 +232,8 @@ class WallSegmentsPainter extends CustomPainter {
     final end = segment.end.offset;
     final start = segment.controlPoint?.offset ?? segment.start.offset;
     final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
-    const size = 18.0;
+    final length = (end - start).distance;
+    final size = math.min(18.0, math.max(7.0, length * 0.42));
     final path = Path()
       ..moveTo(end.dx, end.dy)
       ..lineTo(
@@ -230,8 +245,12 @@ class WallSegmentsPainter extends CustomPainter {
         end.dy - (math.sin(angle + math.pi / 6) * size),
       )
       ..close();
-    canvas.drawPath(path, paint..style = PaintingStyle.fill);
-    paint.style = PaintingStyle.stroke;
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = paint.color
+        ..style = PaintingStyle.fill,
+    );
   }
 
   void _drawPreviewSegment(Canvas canvas, WallSegment segment) {
@@ -244,7 +263,7 @@ class WallSegmentsPainter extends CustomPainter {
     final endpointPaint = Paint()
       ..color = segment.color.withValues(alpha: 0.86);
 
-    canvas.drawPath(_pathForSegment(segment), previewPaint);
+    canvas.drawPath(buildWallSegmentPath(segment), previewPaint);
     if (segment.hasArrow) {
       _drawArrowHead(canvas, segment, previewPaint);
     }
@@ -262,24 +281,6 @@ class WallSegmentsPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2,
     );
-  }
-
-  Path _pathForSegment(WallSegment segment) {
-    final path = Path()..moveTo(segment.start.x, segment.start.y);
-    final controlPoint = segment.controlPoint;
-
-    if (controlPoint == null) {
-      path.lineTo(segment.end.x, segment.end.y);
-    } else {
-      path.quadraticBezierTo(
-        controlPoint.x,
-        controlPoint.y,
-        segment.end.x,
-        segment.end.y,
-      );
-    }
-
-    return path;
   }
 
   void _drawEndpoint(
@@ -394,11 +395,29 @@ class WallSegmentsPainter extends CustomPainter {
   bool shouldRepaint(covariant WallSegmentsPainter oldDelegate) {
     return oldDelegate.segments != segments ||
         oldDelegate.selectedSegmentIndex != selectedSegmentIndex ||
+        oldDelegate.hoveredSegmentIndex != hoveredSegmentIndex ||
         oldDelegate.activeWallStart != activeWallStart ||
         oldDelegate.previewSegment != previewSegment ||
         oldDelegate.drawMeasurements != drawMeasurements ||
         oldDelegate.hiddenSegmentIndexes != hiddenSegmentIndexes;
   }
+}
+
+@visibleForTesting
+Path buildWallSegmentPath(WallSegment segment) {
+  final path = Path()..moveTo(segment.start.x, segment.start.y);
+  final controlPoint = segment.controlPoint;
+  if (controlPoint == null) {
+    path.lineTo(segment.end.x, segment.end.y);
+  } else {
+    path.quadraticBezierTo(
+      controlPoint.x,
+      controlPoint.y,
+      segment.end.x,
+      segment.end.y,
+    );
+  }
+  return path;
 }
 
 enum _LineSymbol {
