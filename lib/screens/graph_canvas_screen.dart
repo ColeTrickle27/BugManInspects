@@ -1,7 +1,9 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../editor/editor_interaction_controller.dart';
@@ -14,6 +16,7 @@ import '../models/job.dart';
 import '../models/wall_segment.dart';
 import '../widgets/canvas_toolbar.dart';
 import '../widgets/freehand_strokes_painter.dart';
+import '../widgets/graph_export_downloader.dart';
 import '../widgets/graph_annotations_painter.dart';
 import '../widgets/graph_grid_painter.dart';
 import '../widgets/graph_shapes_painter.dart';
@@ -45,6 +48,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   static const double _handleHitDistance = 18;
 
   final FocusNode _editorFocusNode = FocusNode(debugLabel: 'Graph editor');
+  final GlobalKey _canvasBoundaryKey = GlobalKey(debugLabel: 'Graph export');
   final TransformationController _transformationController =
       TransformationController();
   late final GraphDocument _document;
@@ -4011,6 +4015,38 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       );
   }
 
+  Future<void> _exportGraph() async {
+    final boundary = _canvasBoundaryKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null) {
+      _showCanvasMessage('Graph export is not ready yet');
+      return;
+    }
+
+    try {
+      final image = await boundary.toImage(pixelRatio: 1);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      if (data == null) {
+        throw StateError('PNG encoding returned no data');
+      }
+      final safeName = _document.customer.name
+          .replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '-')
+          .replaceAll(RegExp(r'^-+|-+$'), '');
+      final downloaded = downloadGraphPng(
+        data.buffer.asUint8List(),
+        '${safeName.isEmpty ? 'bugman-graph' : safeName}-graph.png',
+      );
+      if (!downloaded) {
+        _showCanvasMessage('PNG export is available in the web app');
+        return;
+      }
+      setState(() => _canvasStatus = 'Graph PNG exported');
+    } catch (error) {
+      _showCanvasMessage('Graph export failed: $error');
+    }
+  }
+
   void _zoomBy(double factor) {
     final currentMatrix = _transformationController.value.clone();
     currentMatrix
@@ -4714,43 +4750,46 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                                 minScale: 0.25,
                                 maxScale: 4,
                                 boundaryMargin: const EdgeInsets.all(1200),
-                                child: _CanvasSurface(
-                                  canvasSize: _canvasSize,
-                                  wallSegments: _wallSegments,
-                                  annotations: _annotations,
-                                  shapes: _shapes,
-                                  freehandStrokes: _freehandStrokes,
-                                  draftFreehandPoints: _draftFreehandPoints,
-                                  previewShapeSegments: _previewShapeSegments,
-                                  previewShape: _previewShape,
-                                  hiddenSegmentIndexes: _shapeSegmentIndexSet,
-                                  gridVisible: _gridVisible,
-                                  selectedSegmentIndex:
-                                      _selection?.segmentIndex,
-                                  selectedAnnotationIndex:
-                                      _selection?.annotationIndex,
-                                  selectedShapeIndex: _selection?.shapeIndex,
-                                  selectedFreehandIndex:
-                                      _selection?.freehandIndex,
-                                  hoveredSegmentIndex:
-                                      _hoverSelection?.segmentIndex,
-                                  hoveredAnnotationIndex:
-                                      _hoverSelection?.annotationIndex,
-                                  hoveredShapeIndex:
-                                      _hoverSelection?.shapeIndex,
-                                  hoveredFreehandIndex:
-                                      _hoverSelection?.freehandIndex,
-                                  activeWallStart: _activeWallStart,
-                                  previewSegment: _previewSegment,
-                                  structureVisible:
-                                      _isLayerVisible(_GraphLayer.structure),
-                                  shapesVisible:
-                                      _isLayerVisible(_GraphLayer.shapes),
-                                  findingsVisible:
-                                      _isLayerVisible(_GraphLayer.findings),
-                                  photosVisible:
-                                      _isLayerVisible(_GraphLayer.photos),
-                                  traceLayerVisible: _traceLayerVisible,
+                                child: RepaintBoundary(
+                                  key: _canvasBoundaryKey,
+                                  child: _CanvasSurface(
+                                    canvasSize: _canvasSize,
+                                    wallSegments: _wallSegments,
+                                    annotations: _annotations,
+                                    shapes: _shapes,
+                                    freehandStrokes: _freehandStrokes,
+                                    draftFreehandPoints: _draftFreehandPoints,
+                                    previewShapeSegments: _previewShapeSegments,
+                                    previewShape: _previewShape,
+                                    hiddenSegmentIndexes: _shapeSegmentIndexSet,
+                                    gridVisible: _gridVisible,
+                                    selectedSegmentIndex:
+                                        _selection?.segmentIndex,
+                                    selectedAnnotationIndex:
+                                        _selection?.annotationIndex,
+                                    selectedShapeIndex: _selection?.shapeIndex,
+                                    selectedFreehandIndex:
+                                        _selection?.freehandIndex,
+                                    hoveredSegmentIndex:
+                                        _hoverSelection?.segmentIndex,
+                                    hoveredAnnotationIndex:
+                                        _hoverSelection?.annotationIndex,
+                                    hoveredShapeIndex:
+                                        _hoverSelection?.shapeIndex,
+                                    hoveredFreehandIndex:
+                                        _hoverSelection?.freehandIndex,
+                                    activeWallStart: _activeWallStart,
+                                    previewSegment: _previewSegment,
+                                    structureVisible:
+                                        _isLayerVisible(_GraphLayer.structure),
+                                    shapesVisible:
+                                        _isLayerVisible(_GraphLayer.shapes),
+                                    findingsVisible:
+                                        _isLayerVisible(_GraphLayer.findings),
+                                    photosVisible:
+                                        _isLayerVisible(_GraphLayer.photos),
+                                    traceLayerVisible: _traceLayerVisible,
+                                  ),
                                 ),
                               ),
                             ),
@@ -4786,7 +4825,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onFinish: _finishWallPath,
                           onClear: _confirmClearGraph,
                           onSave: _saveDocument,
-                          onExport: () => _showActionMessage('Export'),
+                          onExport: _exportGraph,
                           onUpload: () => _showActionMessage('Upload'),
                           onZoomIn: () => _zoomBy(1.2),
                           onZoomOut: () => _zoomBy(0.85),
