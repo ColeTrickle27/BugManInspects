@@ -48,6 +48,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   static const double _handleHitDistance = 18;
 
   final FocusNode _editorFocusNode = FocusNode(debugLabel: 'Graph editor');
+    bool _multiTouchPanning = false;
   final GlobalKey _canvasBoundaryKey = GlobalKey(debugLabel: 'Graph export');
   final TransformationController _transformationController =
       TransformationController();
@@ -468,6 +469,15 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     _activePointerCount += 1;
 
+    if (_activePointerCount >= 2) {
+      if (!_multiTouchPanning) {
+        _multiTouchPanning = true;
+        _cancelDrawingGestureForSelection();
+        _resetPointerGesture();
+      }
+      return;
+    }
+
     if (_activePointerCount == 1) {
       _pointerDownPosition = event.localPosition;
       _pointerTravel = 0;
@@ -510,7 +520,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
   }
 
-  void _handlePointerMove(PointerMoveEvent event) {
+  void _handlePointerMove(PointerMoveEvent event) { if (_multiTouchPanning || _activePointerCount >= 2) {
+      return;
+    }
+
     if (_shortcutPanPointers.contains(event.pointer)) {
       return;
     }
@@ -686,6 +699,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     if (_activePointerCount == 0) {
+      _multiTouchPanning = false;
       _resetPointerGesture();
     }
   }
@@ -761,6 +775,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     if (_activePointerCount == 0) {
+       _multiTouchPanning = false;
       _cancelDrawingGestureForSelection();
       _resetPointerGesture();
     }
