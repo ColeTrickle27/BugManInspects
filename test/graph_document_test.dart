@@ -12,8 +12,9 @@ void main() {
   final job = Job(
     customerName: 'Ada Customer',
     serviceAddress: '1 Graph Lane',
-    pestPacAccountNumber: 'P-100',
-    serviceType: 'Termite Inspection',
+    pestPacLocationNumber: 'LOC-100',
+    pestPacBillToNumber: 'BILL-200',
+    serviceType: 'Inspection',
     createdBy: 'Inspector',
     createdDate: DateTime(2026, 7, 14),
   );
@@ -23,6 +24,9 @@ void main() {
 
     expect(document.isDirty, isFalse);
     expect(document.revision, 0);
+    expect(document.createdAt, job.createdDate);
+    expect(document.customer.pestPacLocationNumber, 'LOC-100');
+    expect(document.customer.pestPacBillToNumber, 'BILL-200');
 
     document.replaceWallSegments(const [
       WallSegment(
@@ -91,6 +95,8 @@ void main() {
     final restored = GraphDocument.fromJson(document.toJson());
 
     expect(restored.customer.name, 'Ada Customer');
+    expect(restored.customer.pestPacLocationNumber, 'LOC-100');
+    expect(restored.customer.pestPacBillToNumber, 'BILL-200');
     expect(restored.wallSegments.single.isCurve, isTrue);
     expect(restored.wallSegments.single.hasArrow, isTrue);
     expect(
@@ -108,6 +114,7 @@ void main() {
       'job': {
         'customerName': 'Legacy Customer',
         'serviceAddress': 'Old Format Road',
+        'pestPacAccountNumber': 'LEGACY-300',
       },
       'wallSegments': [
         {
@@ -128,10 +135,16 @@ void main() {
     });
 
     expect(restored.customer.name, 'Legacy Customer');
+    expect(restored.customer.pestPacLocationNumber, 'LEGACY-300');
+    expect(restored.customer.pestPacBillToNumber, isEmpty);
     expect(restored.wallSegments.single.measurementLabel, '1.0 ft');
     expect(restored.shapes.single.name, 'Legacy Main');
     expect(restored.shapes.single.extraProperties['legacyShapeField'], 42);
     expect(restored.toJson()['legacyVendorField'], 'keep-me');
+    final customerJson = restored.toJson()['customer'] as Map<String, Object?>;
+    expect(customerJson['pestPacLocationNumber'], 'LEGACY-300');
+    expect(customerJson['pestPacBillToNumber'], '');
+    expect(customerJson['pestPacAccountNumber'], 'LEGACY-300');
   });
 
   test('retains marker category and type in saved documents', () {

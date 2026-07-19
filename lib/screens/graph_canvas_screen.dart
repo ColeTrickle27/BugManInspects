@@ -4717,14 +4717,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   Widget build(BuildContext context) {
     final sidePanelWidth = _propertiesCollapsed ? 44.0 : 268.0;
     final canvasRightInset = _propertiesCollapsed ? 68.0 : 292.0;
+    final documentTitle = _document.customer.displayName;
 
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 40,
         title: Text(
-          _document.isDirty
-              ? '${_document.customer.name} • Unsaved'
-              : _document.customer.name,
+          _document.isDirty ? '$documentTitle • Unsaved' : documentTitle,
         ),
       ),
       body: Focus(

@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:bugman_graphs/main.dart';
 import 'package:bugman_graphs/models/job.dart';
 import 'package:bugman_graphs/screens/graph_canvas_screen.dart';
+import 'package:bugman_graphs/screens/new_job_screen.dart';
+import 'package:bugman_graphs/theme/app_theme.dart';
 import 'package:bugman_graphs/widgets/canvas_toolbar.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +17,117 @@ void main() {
     expect(find.text('BugMan Graphs'), findsOneWidget);
     expect(find.text('No jobs yet'), findsOneWidget);
     expect(find.text('New Job'), findsOneWidget);
+    expect(find.byKey(const ValueKey('holloman-logo')), findsOneWidget);
+
+    final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    final theme = materialApp.theme!;
+    expect(theme.colorScheme.primary, AppColors.red);
+    expect(theme.colorScheme.secondary, AppColors.black);
+    expect(theme.colorScheme.outline, AppColors.wolfGrey);
+    expect(theme.colorScheme.surface, AppColors.white);
+    expect(theme.colorScheme.onPrimary, AppColors.white);
+  });
+
+  testWidgets('New Job shows optional metadata fields and approved services',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(900, 1200);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const BugManGraphsApp());
+
+    await tester.tap(find.text('New Job'));
+    await tester.pumpAndSettle();
+
+    final fields = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .map((field) => field.decoration?.labelText)
+        .toList();
+    expect(fields, [
+      'Date',
+      'Location Name',
+      'Location Address',
+      'PestPac Location #',
+      'PestPac Bill-To #',
+      'Created By',
+    ]);
+
+    final today = DateTime.now();
+    final expectedDate = '${today.month.toString().padLeft(2, '0')}/'
+        '${today.day.toString().padLeft(2, '0')}/'
+        '${today.year.toString().padLeft(4, '0')}';
+    final dateField = tester.widget<TextField>(
+      find.byKey(const ValueKey('job-date-field')),
+    );
+    expect(dateField.controller?.text, expectedDate);
+    expect(dateField.readOnly, isTrue);
+
+    final serviceType = tester.widget<DropdownButtonFormField<String>>(
+      find.byType(DropdownButtonFormField<String>),
+    );
+    expect(NewJobScreen.serviceTypes,
+        ['Inspection', 'WDIR', 'ATBS Installation', 'General Use']);
+    expect(serviceType.initialValue, 'Inspection');
+    expect(find.text('Termite Inspection'), findsNothing);
+    expect(find.text('Termite Treatment'), findsNothing);
+    expect(find.text('Rodent Inspection'), findsNothing);
+    expect(find.text('General Pest'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('job-date-field')));
+    await tester.pumpAndSettle();
+    expect(find.byType(CalendarDatePicker), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create Graph'), findsOneWidget);
+  });
+
+  testWidgets('blank New Job submission opens an Untitled Job graph',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(900, 1200);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const BugManGraphsApp());
+
+    await tester.tap(find.text('New Job'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create Graph'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Required'), findsNothing);
+    expect(find.text('Untitled Job'), findsOneWidget);
+    expect(find.byType(GraphCanvasScreen), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Untitled Job'), findsOneWidget);
+    expect(find.textContaining('Location #'), findsNothing);
+    expect(find.textContaining('Bill-To #'), findsNothing);
+  });
+
+  testWidgets('job card labels both populated PestPac identifiers',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(900, 1200);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const BugManGraphsApp());
+
+    await tester.tap(find.text('New Job'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'PestPac Location #'),
+      'LOC-42',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'PestPac Bill-To #'),
+      'BILL-84',
+    );
+    await tester.tap(find.text('Create Graph'));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Location # LOC-42'), findsOneWidget);
+    expect(find.text('Bill-To # BILL-84'), findsOneWidget);
   });
 
   testWidgets('structure plotting requires points and Enter completes it',
@@ -406,8 +519,9 @@ Future<void> _pumpEditor(WidgetTester tester) async {
   final job = Job(
     customerName: 'Interaction Test',
     serviceAddress: '1 Canvas Way',
-    pestPacAccountNumber: 'TEST-1',
-    serviceType: 'Termite Inspection',
+    pestPacLocationNumber: 'TEST-1',
+    pestPacBillToNumber: 'BILL-1',
+    serviceType: 'Inspection',
     createdBy: 'Widget Test',
     createdDate: DateTime(2026, 7, 18),
   );

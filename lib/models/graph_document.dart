@@ -41,7 +41,10 @@ class GraphDocument extends ChangeNotifier {
         updatedAt = updatedAt ?? createdAt ?? DateTime.now();
 
   factory GraphDocument.forJob(Job job) {
-    return GraphDocument(customer: GraphCustomerInfo.fromJob(job));
+    return GraphDocument(
+      customer: GraphCustomerInfo.fromJob(job),
+      createdAt: job.createdDate,
+    );
   }
 
   /// Reads both the document format and the original flat graph payload.
@@ -224,7 +227,8 @@ class GraphCustomerInfo {
   const GraphCustomerInfo({
     required this.name,
     required this.serviceAddress,
-    required this.pestPacAccountNumber,
+    required this.pestPacLocationNumber,
+    required this.pestPacBillToNumber,
     required this.serviceType,
     required this.createdBy,
   });
@@ -232,30 +236,42 @@ class GraphCustomerInfo {
   factory GraphCustomerInfo.fromJob(Job job) => GraphCustomerInfo(
         name: job.customerName,
         serviceAddress: job.serviceAddress,
-        pestPacAccountNumber: job.pestPacAccountNumber,
+        pestPacLocationNumber: job.pestPacLocationNumber,
+        pestPacBillToNumber: job.pestPacBillToNumber,
         serviceType: job.serviceType,
         createdBy: job.createdBy,
       );
 
-  factory GraphCustomerInfo.fromJson(Map<String, Object?> json) =>
-      GraphCustomerInfo(
-        name: _string(json['name'] ?? json['customerName']),
-        serviceAddress: _string(json['serviceAddress']),
-        pestPacAccountNumber: _string(json['pestPacAccountNumber']),
-        serviceType: _string(json['serviceType']),
-        createdBy: _string(json['createdBy']),
-      );
+  factory GraphCustomerInfo.fromJson(Map<String, Object?> json) {
+    final legacyAccountNumber = _string(json['pestPacAccountNumber']);
+
+    return GraphCustomerInfo(
+      name: _string(json['name'] ?? json['customerName']),
+      serviceAddress: _string(json['serviceAddress']),
+      pestPacLocationNumber: json.containsKey('pestPacLocationNumber')
+          ? _string(json['pestPacLocationNumber'])
+          : legacyAccountNumber,
+      pestPacBillToNumber: _string(json['pestPacBillToNumber']),
+      serviceType: _string(json['serviceType']),
+      createdBy: _string(json['createdBy']),
+    );
+  }
 
   final String name;
   final String serviceAddress;
-  final String pestPacAccountNumber;
+  final String pestPacLocationNumber;
+  final String pestPacBillToNumber;
   final String serviceType;
   final String createdBy;
+
+  String get displayName => name.trim().isEmpty ? 'Untitled Job' : name;
 
   Map<String, Object?> toJson() => {
         'name': name,
         'serviceAddress': serviceAddress,
-        'pestPacAccountNumber': pestPacAccountNumber,
+        'pestPacLocationNumber': pestPacLocationNumber,
+        'pestPacBillToNumber': pestPacBillToNumber,
+        'pestPacAccountNumber': pestPacLocationNumber,
         'serviceType': serviceType,
         'createdBy': createdBy,
       };

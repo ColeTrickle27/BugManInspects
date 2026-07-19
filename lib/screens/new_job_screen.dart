@@ -10,6 +10,12 @@ class NewJobScreen extends StatefulWidget {
   });
 
   static const String routeName = '/new-job';
+  static const List<String> serviceTypes = [
+    'Inspection',
+    'WDIR',
+    'ATBS Installation',
+    'General Use',
+  ];
 
   final ValueChanged<Job> onCreateJob;
 
@@ -18,35 +24,60 @@ class NewJobScreen extends StatefulWidget {
 }
 
 class _NewJobScreenState extends State<NewJobScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _customerNameController = TextEditingController();
-  final _serviceAddressController = TextEditingController();
-  final _pestPacAccountController = TextEditingController();
+  final _locationNameController = TextEditingController();
+  final _locationAddressController = TextEditingController();
+  final _pestPacLocationController = TextEditingController();
+  final _pestPacBillToController = TextEditingController();
   final _createdByController = TextEditingController();
+  late final TextEditingController _dateController;
+  late DateTime _createdDate;
 
-  String _serviceType = 'Termite Inspection';
+  String _serviceType = 'Inspection';
+
+  @override
+  void initState() {
+    super.initState();
+    _createdDate = DateUtils.dateOnly(DateTime.now());
+    _dateController = TextEditingController(text: _formatDate(_createdDate));
+  }
 
   @override
   void dispose() {
-    _customerNameController.dispose();
-    _serviceAddressController.dispose();
-    _pestPacAccountController.dispose();
+    _locationNameController.dispose();
+    _locationAddressController.dispose();
+    _pestPacLocationController.dispose();
+    _pestPacBillToController.dispose();
     _createdByController.dispose();
+    _dateController.dispose();
     super.dispose();
   }
 
-  void _createJob() {
-    if (!_formKey.currentState!.validate()) {
+  Future<void> _pickDate() async {
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: _createdDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (selectedDate == null || !mounted) {
       return;
     }
 
+    setState(() {
+      _createdDate = DateUtils.dateOnly(selectedDate);
+      _dateController.text = _formatDate(_createdDate);
+    });
+  }
+
+  void _createJob() {
     final job = Job(
-      customerName: _customerNameController.text.trim(),
-      serviceAddress: _serviceAddressController.text.trim(),
-      pestPacAccountNumber: _pestPacAccountController.text.trim(),
+      customerName: _locationNameController.text.trim(),
+      serviceAddress: _locationAddressController.text.trim(),
+      pestPacLocationNumber: _pestPacLocationController.text.trim(),
+      pestPacBillToNumber: _pestPacBillToController.text.trim(),
       serviceType: _serviceType,
       createdBy: _createdByController.text.trim(),
-      createdDate: DateTime.now(),
+      createdDate: _createdDate,
     );
 
     widget.onCreateJob(job);
@@ -64,107 +95,110 @@ class _NewJobScreenState extends State<NewJobScreen> {
         title: const Text('New Job'),
       ),
       body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              TextFormField(
-                controller: _customerNameController,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Customer name',
-                  prefixIcon: Icon(Icons.person_outline),
-                ),
-                validator: _required,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            TextField(
+              key: const ValueKey('job-date-field'),
+              controller: _dateController,
+              readOnly: true,
+              onTap: _pickDate,
+              decoration: const InputDecoration(
+                labelText: 'Date',
+                prefixIcon: Icon(Icons.calendar_today_outlined),
+                suffixIcon: Icon(Icons.edit_calendar_outlined),
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _serviceAddressController,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Service address',
-                  prefixIcon: Icon(Icons.location_on_outlined),
-                ),
-                validator: _required,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _locationNameController,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Location Name',
+                prefixIcon: Icon(Icons.business_outlined),
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _pestPacAccountController,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'PestPac account number',
-                  prefixIcon: Icon(Icons.confirmation_number_outlined),
-                ),
-                validator: _required,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _locationAddressController,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Location Address',
+                prefixIcon: Icon(Icons.location_on_outlined),
               ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _serviceType,
-                decoration: const InputDecoration(
-                  labelText: 'Service type',
-                  prefixIcon: Icon(Icons.bug_report_outlined),
-                ),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'Termite Inspection',
-                    child: Text('Termite Inspection'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'Termite Treatment',
-                    child: Text('Termite Treatment'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'Rodent Inspection',
-                    child: Text('Rodent Inspection'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'General Pest',
-                    child: Text('General Pest'),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value == null) {
-                    return;
-                  }
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _pestPacLocationController,
+              textInputAction: TextInputAction.next,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'PestPac Location #',
+                prefixIcon: Icon(Icons.confirmation_number_outlined),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _pestPacBillToController,
+              textInputAction: TextInputAction.next,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'PestPac Bill-To #',
+                prefixIcon: Icon(Icons.receipt_long_outlined),
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _serviceType,
+              decoration: const InputDecoration(
+                labelText: 'Service Type',
+                prefixIcon: Icon(Icons.bug_report_outlined),
+              ),
+              items: NewJobScreen.serviceTypes
+                  .map(
+                    (serviceType) => DropdownMenuItem(
+                      value: serviceType,
+                      child: Text(serviceType),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
 
-                  setState(() {
-                    _serviceType = value;
-                  });
-                },
+                setState(() {
+                  _serviceType = value;
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _createdByController,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Created By',
+                prefixIcon: Icon(Icons.badge_outlined),
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _createdByController,
-                textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(
-                  labelText: 'Created by',
-                  prefixIcon: Icon(Icons.badge_outlined),
-                ),
-                validator: _required,
-                onFieldSubmitted: (_) => _createJob(),
+              onSubmitted: (_) => _createJob(),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: _createJob,
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Create Graph'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(56),
               ),
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                onPressed: _createJob,
-                icon: const Icon(Icons.arrow_forward),
-                label: const Text('Create Graph'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(56),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  String? _required(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Required';
-    }
-
-    return null;
-  }
+  static String _formatDate(DateTime date) =>
+      '${date.month.toString().padLeft(2, '0')}/'
+      '${date.day.toString().padLeft(2, '0')}/'
+      '${date.year.toString().padLeft(4, '0')}';
 }

@@ -20,3 +20,5 @@ flutter:
   config:
     enable-swift-package-manager: false
   uses-material-design: true
+  assets:
+    - assets/branding/holloman_exterminators.png

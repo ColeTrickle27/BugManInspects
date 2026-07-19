@@ -4,6 +4,7 @@ import 'models/job.dart';
 import 'screens/graph_canvas_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/new_job_screen.dart';
+import 'theme/app_theme.dart';
 
 void main() {
   runApp(const BugManGraphsApp());
@@ -30,21 +31,7 @@ class _BugManGraphsAppState extends State<BugManGraphsApp> {
     return MaterialApp(
       title: 'BugMan Graphs',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2F6F4E),
-          primary: const Color(0xFF2F6F4E),
-          secondary: const Color(0xFFBC8A3D),
-          surface: const Color(0xFFF8F8F4),
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF8F8F4),
-        useMaterial3: true,
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-          filled: true,
-          fillColor: Colors.white,
-        ),
-      ),
+      theme: buildBugManTheme(),
       routes: {
         '/': (context) => HomeScreen(jobs: _jobs),
         NewJobScreen.routeName: (context) => NewJobScreen(onCreateJob: _addJob),
