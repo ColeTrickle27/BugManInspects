@@ -13,6 +13,8 @@ class WallSegmentsPainter extends CustomPainter {
     required this.activeWallStart,
     required this.previewSegment,
     this.drawMeasurements = true,
+    this.paintSegments = true,
+    this.drawEndpoints = true,
     this.hiddenSegmentIndexes = const <int>{},
   });
 
@@ -22,6 +24,8 @@ class WallSegmentsPainter extends CustomPainter {
   final GraphPoint? activeWallStart;
   final WallSegment? previewSegment;
   final bool drawMeasurements;
+  final bool paintSegments;
+  final bool drawEndpoints;
   final Set<int> hiddenSegmentIndexes;
 
   @override
@@ -31,38 +35,40 @@ class WallSegmentsPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 9;
-    for (var i = 0; i < segments.length; i += 1) {
-      if (hiddenSegmentIndexes.contains(i)) {
-        continue;
-      }
+    if (paintSegments) {
+      for (var i = 0; i < segments.length; i += 1) {
+        if (hiddenSegmentIndexes.contains(i)) {
+          continue;
+        }
 
-      final segment = segments[i];
-      final curvePath = buildWallSegmentPath(segment);
-      final wallPaint = Paint()
-        ..color = segment.color
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..strokeWidth = segment.strokeWidth;
+        final segment = segments[i];
+        final curvePath = buildWallSegmentPath(segment);
+        final wallPaint = Paint()
+          ..color = segment.color
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..strokeWidth = segment.strokeWidth;
 
-      canvas.drawPath(curvePath, wallOutlinePaint);
-      if (i == hoveredSegmentIndex && i != selectedSegmentIndex) {
-        canvas.drawPath(
-          curvePath,
-          Paint()
-            ..color = const Color(0xFF2F80ED).withValues(alpha: 0.42)
-            ..style = PaintingStyle.stroke
-            ..strokeCap = StrokeCap.round
-            ..strokeWidth = segment.strokeWidth + 8,
-        );
-      }
-      _drawPatternedPath(canvas, curvePath, segment, wallPaint);
-      if (segment.hasArrow) {
-        _drawArrowHead(canvas, segment, wallPaint);
-      }
+        canvas.drawPath(curvePath, wallOutlinePaint);
+        if (i == hoveredSegmentIndex && i != selectedSegmentIndex) {
+          canvas.drawPath(
+            curvePath,
+            Paint()
+              ..color = const Color(0xFF2F80ED).withValues(alpha: 0.42)
+              ..style = PaintingStyle.stroke
+              ..strokeCap = StrokeCap.round
+              ..strokeWidth = segment.strokeWidth + 8,
+          );
+        }
+        _drawPatternedPath(canvas, curvePath, segment, wallPaint);
+        if (segment.hasArrow) {
+          _drawArrowHead(canvas, segment, wallPaint);
+        }
 
-      if (i == selectedSegmentIndex) {
-        _drawSelectedSegment(canvas, segment);
+        if (i == selectedSegmentIndex) {
+          _drawSelectedSegment(canvas, segment);
+        }
       }
     }
 
@@ -72,8 +78,10 @@ class WallSegmentsPainter extends CustomPainter {
       }
 
       final segment = segments[i];
-      _drawEndpoint(canvas, segment.start, const Color(0xFF214D38));
-      _drawEndpoint(canvas, segment.end, const Color(0xFF214D38));
+      if (drawEndpoints) {
+        _drawEndpoint(canvas, segment.start, const Color(0xFF214D38));
+        _drawEndpoint(canvas, segment.end, const Color(0xFF214D38));
+      }
       if (drawMeasurements) {
         _drawMeasurementLabel(canvas, segment);
       }

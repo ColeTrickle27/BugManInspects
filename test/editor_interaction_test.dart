@@ -101,6 +101,83 @@ void main() {
         isNot(contains(GraphDrawingPreset.measurementLine)));
     expect(structureToolbarPresets,
         isNot(contains(GraphDrawingPreset.treatmentArea)));
+    expect(basicLineToolbarActions.map((action) => action.tool), [
+      CanvasTool.wall,
+      CanvasTool.arrow,
+      CanvasTool.curve,
+      CanvasTool.freehand,
+    ]);
+    expect(basicShapeToolbarActions.map((action) => action.tool), [
+      CanvasTool.rectangle,
+      CanvasTool.circle,
+      CanvasTool.ellipse,
+      CanvasTool.triangle,
+    ]);
+    expect(propertyToolbarActions.map((action) => action.preset), [
+      GraphDrawingPreset.driveway,
+      GraphDrawingPreset.walkway,
+      GraphDrawingPreset.propertyLine,
+    ]);
+    expect(utilityToolbarMarkers, [
+      GraphMarkerType.hvacUnit,
+      GraphMarkerType.pier,
+      GraphMarkerType.steps,
+      GraphMarkerType.crawlspaceAccess,
+      GraphMarkerType.gasLine,
+      GraphMarkerType.waterLine,
+    ]);
+    expect(CanvasTool.select.icon, Icons.navigation);
+    expect(CanvasTool.pan.icon, Icons.pan_tool_outlined);
+    expect(GraphDrawingPreset.measurementLine.label, 'Quick Measure');
+  });
+
+  test('structure and property summaries use approved measurement units', () {
+    const segments = [
+      WallSegment(
+        start: GraphPoint(x: 0, y: 0),
+        end: GraphPoint(x: 24, y: 0),
+      ),
+      WallSegment(
+        start: GraphPoint(x: 24, y: 0),
+        end: GraphPoint(x: 24, y: 24),
+      ),
+      WallSegment(
+        start: GraphPoint(x: 24, y: 24),
+        end: GraphPoint(x: 0, y: 24),
+      ),
+      WallSegment(
+        start: GraphPoint(x: 0, y: 24),
+        end: GraphPoint(x: 0, y: 0),
+      ),
+    ];
+    const structure = GraphShape(
+      name: 'Main Structure',
+      segmentIndexes: [0, 1, 2, 3],
+      fillColor: Color(0xFFB6D94C),
+      fillOpacity: 0.3,
+      borderColor: Color(0xFF214D38),
+      borderWidth: 3,
+      pattern: GraphShapePattern.none,
+      closed: true,
+      rotationDegrees: 0,
+      preset: GraphDrawingPreset.mainStructure,
+    );
+    const property = GraphShape(
+      name: 'Property Line',
+      segmentIndexes: [0, 1, 2, 3],
+      fillColor: null,
+      fillOpacity: 0,
+      borderColor: Color(0xFF214D38),
+      borderWidth: 2,
+      pattern: GraphShapePattern.none,
+      closed: true,
+      rotationDegrees: 0,
+      preset: GraphDrawingPreset.propertyLine,
+    );
+
+    expect(shapeMeasurementSummary(structure, segments), '4 lf • 1 sf');
+    expect(shapeMeasurementSummary(property, segments), '0.00 ac • 1 sf');
+    expect(segments.first.measurementLabel, '1.0 lf');
   });
 
   test('completed fence uses its saved X-mark segment styling', () {

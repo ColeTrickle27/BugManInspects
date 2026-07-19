@@ -8,6 +8,53 @@ import 'wall_segments_painter.dart';
 bool usesStyledSegmentRendering(GraphShape shape) =>
     shape.preset?.kind == GraphDrawingPresetKind.line;
 
+@visibleForTesting
+String shapeMeasurementSummary(
+  GraphShape shape,
+  List<WallSegment> shapeSegments,
+) {
+  final preset = shape.preset;
+  if (preset == null || shapeSegments.isEmpty) {
+    return '';
+  }
+
+  final squareFeet = _shapeAreaSquareFeet(shape, shapeSegments);
+  if (preset.showsLinearAndAreaMeasurements) {
+    final linearFeet = shapeSegments.fold<double>(
+      0,
+      (total, segment) => total + segment.lengthFeet,
+    );
+    return '${linearFeet.round()} lf • ${squareFeet.round()} sf';
+  }
+
+  if (preset.showsPropertyAreaMeasurements && shape.closed) {
+    final acres = squareFeet / 43560;
+    return '${acres.toStringAsFixed(2)} ac • ${squareFeet.round()} sf';
+  }
+
+  return '';
+}
+
+double _shapeAreaSquareFeet(
+  GraphShape shape,
+  List<WallSegment> shapeSegments,
+) {
+  if (!shape.closed || shapeSegments.length < 3) {
+    return 0;
+  }
+
+  final points = shapeSegments.map((segment) => segment.start).toList();
+  var areaPixels = 0.0;
+  for (var i = 0; i < points.length; i += 1) {
+    final current = points[i];
+    final next = points[(i + 1) % points.length];
+    areaPixels += (current.x * next.y) - (next.x * current.y);
+  }
+  return areaPixels.abs() /
+      2 /
+      (WallSegment.pixelsPerFoot * WallSegment.pixelsPerFoot);
+}
+
 class GraphShapesPainter extends CustomPainter {
   const GraphShapesPainter({
     required this.shapes,
@@ -54,11 +101,26 @@ class GraphShapesPainter extends CustomPainter {
       if (!isStyledLine) {
         _drawPattern(canvas, shape.pattern, path, bounds);
         _drawShapeBorder(canvas, shape, path);
+        if (shape.preset?.showsLinearAndAreaMeasurements ?? false) {
+          WallSegmentsPainter(
+            segments: shapeSegments,
+            selectedSegmentIndex: null,
+            hoveredSegmentIndex: null,
+            activeWallStart: null,
+            previewSegment: null,
+            paintSegments: false,
+            drawEndpoints: false,
+          ).paint(canvas, size);
+        }
       }
 
+      final measurementSummary = shapeMeasurementSummary(shape, shapeSegments);
+      final shapeLabel = shape.text.trim().isEmpty ? shape.name : shape.text;
       _drawShapeName(
         canvas,
-        shape.text.trim().isEmpty ? shape.name : shape.text,
+        measurementSummary.isEmpty
+            ? shapeLabel
+            : '$shapeLabel\n$measurementSummary',
         bounds.center,
       );
 
@@ -304,11 +366,13 @@ class GraphShapesPainter extends CustomPainter {
         text: name,
         style: const TextStyle(
           color: Color(0xFF1C2B22),
-          fontSize: 16,
+          fontSize: 15,
           fontWeight: FontWeight.w800,
+          height: 1.25,
         ),
       ),
       textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
     )..layout(maxWidth: 220);
     final labelRect = Rect.fromCenter(
       center: center,

@@ -45,10 +45,10 @@ class WallSegment {
 
   String get measurementLabel {
     if (lengthFeet < 10) {
-      return '${lengthFeet.toStringAsFixed(1)} ft';
+      return '${lengthFeet.toStringAsFixed(1)} lf';
     }
 
-    return '${lengthFeet.round()} ft';
+    return '${lengthFeet.round()} lf';
   }
 
   WallSegment copyWith({

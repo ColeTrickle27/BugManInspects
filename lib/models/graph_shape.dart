@@ -33,7 +33,7 @@ enum GraphDrawingPreset {
     LinePatternValue.solid,
   ),
   slab(
-    'Slab',
+    'Concrete Slab',
     'SLAB',
     GraphDrawingPresetKind.area,
     Color(0xFFD8DEE6),
@@ -124,7 +124,7 @@ enum GraphDrawingPreset {
     LinePatternValue.solid,
   ),
   garage(
-    'Garage',
+    'Garage/Carport',
     'GAR',
     GraphDrawingPresetKind.area,
     Color(0xFFB5C8D8),
@@ -147,6 +147,32 @@ enum GraphDrawingPreset {
     GraphShapePattern.reverseDiagonal,
     Color(0xFF6246A8),
     5,
+    LinePatternValue.solid,
+  ),
+  driveway(
+    'Driveway',
+    'DRIVE',
+    GraphDrawingPresetKind.area,
+    Color(0xFF9EA3A8),
+    0.30,
+    Color(0xFF4B4F54),
+    3,
+    GraphShapePattern.none,
+    Color(0xFF4B4F54),
+    4,
+    LinePatternValue.solid,
+  ),
+  walkway(
+    'Walkway',
+    'WALK',
+    GraphDrawingPresetKind.area,
+    Color(0xFFC4C7CA),
+    0.34,
+    Color(0xFF6D6E71),
+    3,
+    GraphShapePattern.none,
+    Color(0xFF6D6E71),
+    4,
     LinePatternValue.solid,
   ),
   propertyLine(
@@ -176,8 +202,8 @@ enum GraphDrawingPreset {
     LinePatternValue.xMarks,
   ),
   measurementLine(
-    'Measurement Line',
-    'MEAS',
+    'Quick Measure',
+    'QUICK',
     GraphDrawingPresetKind.line,
     null,
     0,
@@ -227,6 +253,22 @@ enum GraphDrawingPreset {
   final Color defaultLineColor;
   final double defaultLineWidth;
   final LinePatternValue defaultLinePattern;
+}
+
+extension GraphDrawingPresetMeasurements on GraphDrawingPreset {
+  bool get showsLinearAndAreaMeasurements => const {
+        GraphDrawingPreset.mainStructure,
+        GraphDrawingPreset.slab,
+        GraphDrawingPreset.crawlspace,
+        GraphDrawingPreset.woodDeck,
+        GraphDrawingPreset.openPorch,
+        GraphDrawingPreset.dirtFilledPorch,
+        GraphDrawingPreset.garage,
+        GraphDrawingPreset.detachedStructure,
+      }.contains(this);
+
+  bool get showsPropertyAreaMeasurements =>
+      this == GraphDrawingPreset.propertyLine;
 }
 
 enum LinePatternValue {

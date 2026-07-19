@@ -137,7 +137,7 @@ void main() {
     expect(restored.customer.name, 'Legacy Customer');
     expect(restored.customer.pestPacLocationNumber, 'LEGACY-300');
     expect(restored.customer.pestPacBillToNumber, isEmpty);
-    expect(restored.wallSegments.single.measurementLabel, '1.0 ft');
+    expect(restored.wallSegments.single.measurementLabel, '1.0 lf');
     expect(restored.shapes.single.name, 'Legacy Main');
     expect(restored.shapes.single.extraProperties['legacyShapeField'], 42);
     expect(restored.toJson()['legacyVendorField'], 'keep-me');

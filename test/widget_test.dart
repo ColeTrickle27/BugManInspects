@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:bugman_graphs/main.dart';
+import 'package:bugman_graphs/models/graph_shape.dart';
 import 'package:bugman_graphs/models/job.dart';
 import 'package:bugman_graphs/screens/graph_canvas_screen.dart';
 import 'package:bugman_graphs/screens/new_job_screen.dart';
@@ -158,7 +159,7 @@ void main() {
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
-    await _selectStructure(tester, 'Garage');
+    await _selectStructure(tester, 'Garage/Carport');
 
     await tester.tapAt(const Offset(280, 240));
     await tester.tapAt(const Offset(500, 240));
@@ -194,7 +195,7 @@ void main() {
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
 
-    await tester.tap(find.textContaining('Rectangle').first);
+    await _selectBasicShape(tester, 'Rectangle');
     await tester.pump();
     await tester.tapAt(const Offset(300, 250));
     await tester.pump();
@@ -211,6 +212,84 @@ void main() {
     expect(find.text('Edit shape text'), findsOneWidget);
   });
 
+  testWidgets('deleting a finished shape removes its backing lines',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    await _selectBasicShape(tester, 'Rectangle');
+    await tester.dragFrom(const Offset(300, 250), const Offset(220, 170));
+    await tester.pump();
+    expect(find.text('1 overlays'), findsOneWidget);
+    expect(find.text('4 lines'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+
+    expect(find.text('0 overlays'), findsOneWidget);
+    expect(find.text('0 lines'), findsOneWidget);
+  });
+
+  testWidgets('main and quick toolbars collapse independently', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    expect(find.text('Select V'), findsNothing);
+    expect(find.text('Pan H'), findsNothing);
+    expect(find.byType(CanvasQuickToolbar), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Hide main toolbar'));
+    await tester.pump();
+    expect(find.byType(CanvasToolbar), findsNothing);
+    expect(find.byTooltip('Show main toolbar'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Hide quick toolbar'));
+    await tester.pump();
+    expect(find.byType(CanvasQuickToolbar), findsNothing);
+    expect(find.byTooltip('Show quick toolbar'), findsOneWidget);
+  });
+
+  testWidgets('main toolbar tools can be dragged into quick tools',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    final quickMeasure = find.byTooltip(
+      'Quick Measure\nHold and drag to customize quick tools',
+    );
+    final quickToolbar = find.byKey(const ValueKey('canvas-quick-toolbar'));
+    expect(quickMeasure, findsOneWidget);
+    expect(quickToolbar, findsOneWidget);
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(quickMeasure),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await gesture.moveTo(tester.getCenter(quickToolbar));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    final toolbar = tester.widget<CanvasQuickToolbar>(
+      find.byType(CanvasQuickToolbar),
+    );
+    expect(
+      toolbar.actions,
+      contains(
+        const CanvasToolbarAction.preset(
+          GraphDrawingPreset.measurementLine,
+        ),
+      ),
+    );
+  });
+
   testWidgets(
       'existing object selection and movement override an active structure tool',
       (tester) async {
@@ -219,12 +298,12 @@ void main() {
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
 
-    await tester.tap(find.textContaining('Rectangle').first);
+    await _selectBasicShape(tester, 'Rectangle');
     await tester.dragFrom(const Offset(300, 250), const Offset(220, 170));
     await tester.pump();
     expect(find.text('1 overlays'), findsOneWidget);
 
-    await _selectStructure(tester, 'Slab');
+    await _selectStructure(tester, 'Concrete Slab');
     await tester.tapAt(const Offset(410, 335));
     await tester.pump();
     expect(find.text('1 overlays'), findsOneWidget);
@@ -258,9 +337,7 @@ void main() {
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
 
-    await tester.ensureVisible(find.textContaining('Rectangle').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('Rectangle').first);
+    await _selectBasicShape(tester, 'Rectangle');
     await tester.dragFrom(const Offset(250, 220), const Offset(180, 140));
     await tester.pump();
     expect(find.text('1 overlays'), findsOneWidget);
@@ -294,11 +371,13 @@ void main() {
 
       expect(matrix.entry(0, 3), closeTo((viewport.width - 3600) / 2, 0.1));
       expect(matrix.entry(1, 3), closeTo((viewport.height - 2600) / 2, 0.1));
-      expect(find.text('Drawing Tools'), findsOneWidget);
+      expect(find.text('Basic'), findsOneWidget);
       expect(find.text('Structures'), findsOneWidget);
       expect(find.text('Inspection Markers'), findsOneWidget);
       expect(find.text('Treatment Markers'), findsOneWidget);
-      expect(find.text('Review'), findsOneWidget);
+      expect(find.byType(CanvasQuickToolbar), findsOneWidget);
+      expect(find.byTooltip('Select (V)'), findsOneWidget);
+      expect(find.byTooltip('Pan (H)'), findsOneWidget);
       expect(
         find.descendant(
           of: find.byType(CanvasToolbar),
@@ -315,7 +394,7 @@ void main() {
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
-    await tester.tap(find.byTooltip('Line (L)'));
+    await _selectLineTool(tester, 'Line');
     await tester.pump();
 
     final viewerBefore = tester.widget<InteractiveViewer>(
@@ -407,7 +486,7 @@ void main() {
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
-    await tester.tap(find.byTooltip('Line (L)'));
+    await _selectLineTool(tester, 'Line');
     await tester.tapAt(const Offset(320, 260));
     await tester.tapAt(const Offset(500, 260));
     await tester.tapAt(const Offset(500, 420));
@@ -424,7 +503,7 @@ void main() {
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
-    await tester.tap(find.byTooltip('Line (L)'));
+    await _selectLineTool(tester, 'Line');
     await tester.tapAt(const Offset(320, 260));
     await tester.tapAt(const Offset(500, 260));
     await tester.tapAt(const Offset(500, 420));
@@ -473,7 +552,7 @@ void main() {
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
-    await tester.tap(find.byTooltip('Line (L)'));
+    await _selectLineTool(tester, 'Line');
     await tester.tapAt(const Offset(320, 260));
     await tester.tapAt(const Offset(500, 260));
     await _secondaryClick(tester, const Offset(500, 260));
@@ -499,7 +578,7 @@ void main() {
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
-    await tester.tap(find.byTooltip('Line (L)'));
+    await _selectLineTool(tester, 'Line');
     await tester.dragFrom(const Offset(320, 300), const Offset(260, 0));
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
@@ -539,9 +618,35 @@ Future<void> _secondaryClick(WidgetTester tester, Offset position) async {
 }
 
 Future<void> _selectStructure(WidgetTester tester, String label) async {
-  await tester.ensureVisible(find.text('MAIN'));
+  if (label == 'Main Structure') {
+    await tester.ensureVisible(find.text('MAIN'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MAIN'));
+    await tester.pumpAndSettle();
+    return;
+  }
+
+  await tester.ensureVisible(find.text('Building Features'));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('MAIN'));
+  await tester.tap(find.text('Building Features'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _selectBasicShape(WidgetTester tester, String label) async {
+  await tester.ensureVisible(find.text('Basic Shapes'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Basic Shapes'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _selectLineTool(WidgetTester tester, String label) async {
+  await tester.ensureVisible(find.text('Lines'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Lines'));
   await tester.pumpAndSettle();
   await tester.tap(find.text(label));
   await tester.pumpAndSettle();

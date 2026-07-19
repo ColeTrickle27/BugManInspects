@@ -48,7 +48,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   static const double _handleHitDistance = 18;
 
   final FocusNode _editorFocusNode = FocusNode(debugLabel: 'Graph editor');
-    bool _multiTouchPanning = false;
+  bool _multiTouchPanning = false;
   final GlobalKey _canvasBoundaryKey = GlobalKey(debugLabel: 'Graph export');
   final TransformationController _transformationController =
       TransformationController();
@@ -68,8 +68,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   bool _gridVisible = true;
   bool _snapToGrid = true;
   bool _snapToObjects = true;
-  bool _propertiesCollapsed = false;
+  bool? _propertiesCollapsedOverride;
   bool _layersCollapsed = false;
+  bool _mainToolbarCollapsed = false;
+  bool _quickToolbarCollapsed = false;
+  List<CanvasToolbarAction> _quickToolbarActions = const [
+    CanvasToolbarAction.tool(CanvasTool.select),
+    CanvasToolbarAction.tool(CanvasTool.pan),
+  ];
   String _scaleLabel = '1:1';
   Offset? _pointerDownPosition;
   _Selection? _pointerDownHitSelection;
@@ -226,6 +232,42 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _canvasStatus = '${preset.label}: click each corner, then Finish';
     });
     _editorFocusNode.requestFocus();
+  }
+
+  void _activateToolbarAction(CanvasToolbarAction action) {
+    switch (action.kind) {
+      case CanvasToolbarActionKind.tool:
+        _selectTool(action.tool!);
+      case CanvasToolbarActionKind.preset:
+        _selectDrawingPreset(action.preset!);
+      case CanvasToolbarActionKind.marker:
+        _selectMarker(action.marker!);
+    }
+  }
+
+  void _addQuickToolbarAction(CanvasToolbarAction action) {
+    if (_quickToolbarActions.contains(action)) {
+      _showCanvasMessage('${action.label} is already in quick tools');
+      return;
+    }
+    if (_quickToolbarActions.length >= 8) {
+      _showCanvasMessage('Quick tools can hold up to 8 tools');
+      return;
+    }
+    setState(() {
+      _quickToolbarActions = [..._quickToolbarActions, action];
+      _canvasStatus = '${action.label} added to quick tools';
+    });
+  }
+
+  void _resetQuickToolbar() {
+    setState(() {
+      _quickToolbarActions = const [
+        CanvasToolbarAction.tool(CanvasTool.select),
+        CanvasToolbarAction.tool(CanvasTool.pan),
+      ];
+      _canvasStatus = 'Quick tools reset';
+    });
   }
 
   _MarkerStyleDefaults _markerDefaultsFor(GraphMarkerType markerType) {
@@ -520,7 +562,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
   }
 
-  void _handlePointerMove(PointerMoveEvent event) { if (_multiTouchPanning || _activePointerCount >= 2) {
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (_multiTouchPanning || _activePointerCount >= 2) {
       return;
     }
 
@@ -775,7 +818,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     if (_activePointerCount == 0) {
-       _multiTouchPanning = false;
+      _multiTouchPanning = false;
       _cancelDrawingGestureForSelection();
       _resetPointerGesture();
     }
@@ -3524,8 +3567,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         case _SelectionKind.shape:
           final index = currentSelection.index;
           if (index >= 0 && index < _shapes.length) {
-            _shapes = <GraphShape>[..._shapes]..removeAt(index);
-            _canvasStatus = 'Shape overlay deleted';
+            _removeShapeAt(index);
+            _canvasStatus = 'Shape deleted';
           }
           break;
         case _SelectionKind.freehand:
@@ -3752,6 +3795,47 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _shapes = nextShapes;
   }
 
+  void _removeShapeAt(int removedShapeIndex) {
+    if (removedShapeIndex < 0 || removedShapeIndex >= _shapes.length) {
+      return;
+    }
+
+    final removedIndexes = _shapes[removedShapeIndex]
+        .segmentIndexes
+        .where((index) => index >= 0 && index < _wallSegments.length)
+        .toSet();
+    final oldToNewIndexes = <int, int>{};
+    final nextWallSegments = <WallSegment>[];
+
+    for (var oldIndex = 0; oldIndex < _wallSegments.length; oldIndex += 1) {
+      if (removedIndexes.contains(oldIndex)) {
+        continue;
+      }
+      oldToNewIndexes[oldIndex] = nextWallSegments.length;
+      nextWallSegments.add(_wallSegments[oldIndex]);
+    }
+
+    final nextShapes = <GraphShape>[];
+    for (var shapeIndex = 0; shapeIndex < _shapes.length; shapeIndex += 1) {
+      if (shapeIndex == removedShapeIndex) {
+        continue;
+      }
+      final nextIndexes = _shapes[shapeIndex]
+          .segmentIndexes
+          .map((index) => oldToNewIndexes[index])
+          .whereType<int>()
+          .toList(growable: false);
+      if (nextIndexes.isNotEmpty) {
+        nextShapes.add(
+          _shapes[shapeIndex].copyWith(segmentIndexes: nextIndexes),
+        );
+      }
+    }
+
+    _wallSegments = nextWallSegments;
+    _shapes = nextShapes;
+  }
+
   void _duplicateShape(int shapeIndex, Offset duplicateOffset) {
     final shape = _shapes[shapeIndex];
     final newSegmentIndexes = <int>[];
@@ -3941,10 +4025,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _togglePropertiesCollapsed() {
+    final currentlyCollapsed =
+        _propertiesCollapsedOverride ?? MediaQuery.sizeOf(context).width < 700;
     setState(() {
-      _propertiesCollapsed = !_propertiesCollapsed;
+      _propertiesCollapsedOverride = !currentlyCollapsed;
       _canvasStatus =
-          _propertiesCollapsed ? 'Properties collapsed' : 'Properties shown';
+          !currentlyCollapsed ? 'Properties collapsed' : 'Properties shown';
     });
   }
 
@@ -4715,8 +4801,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final sidePanelWidth = _propertiesCollapsed ? 44.0 : 268.0;
-    final canvasRightInset = _propertiesCollapsed ? 68.0 : 292.0;
+    final propertiesCollapsed =
+        _propertiesCollapsedOverride ?? MediaQuery.sizeOf(context).width < 700;
+    final sidePanelWidth = propertiesCollapsed ? 44.0 : 268.0;
+    final canvasRightInset = propertiesCollapsed ? 68.0 : 292.0;
+    final canvasLeftInset = _mainToolbarCollapsed ? 68.0 : 96.0;
+    final canvasBottomInset = _quickToolbarCollapsed ? 12.0 : 82.0;
     final documentTitle = _document.customer.displayName;
 
     return Scaffold(
@@ -4737,10 +4827,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      left: 96,
+                      left: canvasLeftInset,
                       top: 54,
                       right: canvasRightInset,
-                      bottom: 12,
+                      bottom: canvasBottomInset,
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           _centerCanvasInViewport(constraints.biggest);
@@ -4811,20 +4901,77 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                         },
                       ),
                     ),
+                    if (!_mainToolbarCollapsed)
+                      Positioned(
+                        left: 12,
+                        top: 54,
+                        bottom: 12,
+                        width: 72,
+                        child: CanvasToolbar(
+                          selectedTool: _selectedTool,
+                          selectedMarkerType: _selectedMarkerType,
+                          selectedDrawingPreset: _selectedDrawingPreset,
+                          onToolSelected: _selectTool,
+                          onMarkerSelected: _selectMarker,
+                          onDrawingPresetSelected: _selectDrawingPreset,
+                          traceLayerVisible: _traceLayerVisible,
+                          onToggleTraceLayer: _toggleTraceLayer,
+                          onCollapse: () => setState(
+                            () => _mainToolbarCollapsed = true,
+                          ),
+                        ),
+                      )
+                    else
+                      Positioned(
+                        left: 12,
+                        top: 54,
+                        child: Material(
+                          elevation: 6,
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          child: IconButton(
+                            tooltip: 'Show main toolbar',
+                            onPressed: () => setState(
+                              () => _mainToolbarCollapsed = false,
+                            ),
+                            icon: const Icon(Icons.chevron_right),
+                          ),
+                        ),
+                      ),
                     Positioned(
-                      left: 12,
-                      top: 54,
+                      left: canvasLeftInset,
+                      right: canvasRightInset,
                       bottom: 12,
-                      width: 72,
-                      child: CanvasToolbar(
-                        selectedTool: _selectedTool,
-                        selectedMarkerType: _selectedMarkerType,
-                        selectedDrawingPreset: _selectedStructureType,
-                        onToolSelected: _selectTool,
-                        onMarkerSelected: _selectMarker,
-                        onDrawingPresetSelected: _selectDrawingPreset,
-                        traceLayerVisible: _traceLayerVisible,
-                        onToggleTraceLayer: _toggleTraceLayer,
+                      child: Align(
+                        alignment: Alignment.bottomCenter,
+                        child: _quickToolbarCollapsed
+                            ? Material(
+                                elevation: 8,
+                                color: Colors.white,
+                                shape: const CircleBorder(),
+                                child: IconButton(
+                                  key: const ValueKey(
+                                    'show-canvas-quick-toolbar',
+                                  ),
+                                  tooltip: 'Show quick toolbar',
+                                  onPressed: () => setState(
+                                    () => _quickToolbarCollapsed = false,
+                                  ),
+                                  icon: const Icon(Icons.keyboard_arrow_up),
+                                ),
+                              )
+                            : CanvasQuickToolbar(
+                                actions: _quickToolbarActions,
+                                selectedTool: _selectedTool,
+                                selectedMarkerType: _selectedMarkerType,
+                                selectedDrawingPreset: _selectedDrawingPreset,
+                                onActionSelected: _activateToolbarAction,
+                                onActionAdded: _addQuickToolbarAction,
+                                onReset: _resetQuickToolbar,
+                                onCollapse: () => setState(
+                                  () => _quickToolbarCollapsed = true,
+                                ),
+                              ),
                       ),
                     ),
                     Positioned(
@@ -4860,7 +5007,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                       right: 12,
                       bottom: 12,
                       width: sidePanelWidth,
-                      child: _propertiesCollapsed
+                      child: propertiesCollapsed
                           ? _CollapsedPanelTab(
                               icon: Icons.tune,
                               label: 'Props',

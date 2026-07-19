@@ -4,8 +4,8 @@ import '../models/graph_annotation.dart';
 import '../models/graph_shape.dart';
 
 enum CanvasTool {
-  select(Icons.mouse_outlined, 'Select', 'V'),
-  pan(Icons.pan_tool_alt_outlined, 'Pan', 'H'),
+  select(Icons.navigation, 'Select', 'V'),
+  pan(Icons.pan_tool_outlined, 'Pan', 'H'),
   structure(Icons.account_tree_outlined, 'Draw Structure', 'B'),
   rectangle(Icons.crop_square, 'Rectangle', 'R'),
   square(Icons.check_box_outline_blank, 'Square', 'S'),
@@ -18,7 +18,7 @@ enum CanvasTool {
   freehand(Icons.gesture, 'Freehand', 'F'),
   marker(Icons.place_outlined, 'Marker', 'M'),
   photo(Icons.add_a_photo_outlined, 'Photo', 'P'),
-  text(Icons.text_fields, 'Inspection Note', 'T');
+  text(Icons.text_fields, 'Text', 'T');
 
   const CanvasTool(this.icon, this.label, this.shortcut);
 
