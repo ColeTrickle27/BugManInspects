@@ -187,6 +187,19 @@ enum GraphDrawingPreset {
     Color(0xFF245BDB),
     3,
     LinePatternValue.solid,
+  ),
+  treatmentArea(
+    'Treatment Area',
+    'TA',
+    GraphDrawingPresetKind.area,
+    Color(0xFF5B8DEF),
+    0.22,
+    Color(0xFF245BDB),
+    3,
+    GraphShapePattern.dots,
+    Color(0xFF245BDB),
+    3,
+    LinePatternValue.solid,
   );
 
   const GraphDrawingPreset(

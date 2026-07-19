@@ -41,7 +41,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   static const double _tapMovementLimit = 10;
   static const Duration _doubleClickWindow = Duration(milliseconds: 360);
   static const double _angleSnapToleranceRadians = math.pi / 18;
-  static const double _dragHitDistance = 34;
+  static const double _objectHitDistance = 14;
+  static const double _handleHitDistance = 18;
 
   final FocusNode _editorFocusNode = FocusNode(debugLabel: 'Graph editor');
   final TransformationController _transformationController =
@@ -90,7 +91,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   _ClipboardItem? _clipboardItem;
   bool _draggingLineTool = false;
   bool _lineDragStartedNewPath = false;
-  Color _selectedMarkerColor = GraphMarkerType.activeTermites.defaultColor;
+  bool _spacePanActive = false;
+  bool _initialCanvasCentered = false;
+  final Set<int> _shortcutPanPointers = <int>{};
+  Color _selectedMarkerColor = GraphMarkerType.mudTube.defaultColor;
   double _selectedMarkerSize = 1;
   final Map<GraphDrawingPreset, _DrawingStyleDefaults> _drawingPresetDefaults =
       {
@@ -187,6 +191,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _selectMarker(GraphMarkerType markerType) {
+    if (markerType == GraphMarkerType.treatmentArea) {
+      _selectDrawingPreset(GraphDrawingPreset.treatmentArea);
+      return;
+    }
     final markerDefault = _markerDefaultsFor(markerType);
     setState(() {
       _interaction.selectMarker(markerType);
@@ -264,6 +272,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _selectedDrawingDefaults?.pattern ?? _defaultShapePattern;
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event.logicalKey == LogicalKeyboardKey.space) {
+      final nextValue = event is KeyDownEvent || event is KeyRepeatEvent;
+      if (_spacePanActive != nextValue) {
+        setState(() => _spacePanActive = nextValue);
+      }
+      return KeyEventResult.handled;
+    }
+
     if (event is! KeyDownEvent) {
       return KeyEventResult.ignored;
     }
@@ -425,16 +441,24 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       case CanvasTool.photo:
         return 'Photo selected: tap the graph';
       case CanvasTool.text:
-        return 'Text selected: tap the graph';
+        return 'Inspection Note selected: tap the graph';
     }
   }
 
   void _handlePointerDown(PointerDownEvent event) {
     _editorFocusNode.requestFocus();
     if (event.buttons == kSecondaryMouseButton) {
+      if (_removeLatestDraftPoint()) {
+        return;
+      }
       final sceneOffset =
           _transformationController.toScene(event.localPosition);
       _showContextMenu(event.position, sceneOffset);
+      return;
+    }
+
+    if (_spacePanActive && event.buttons == kPrimaryMouseButton) {
+      _shortcutPanPointers.add(event.pointer);
       return;
     }
 
@@ -449,6 +473,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       final sceneOffset =
           _transformationController.toScene(event.localPosition);
       _interaction.pointerDown(sceneOffset);
+      if (_shouldFinishFromDoubleClick(sceneOffset)) {
+        _pointerDownHitSelection = null;
+        return;
+      }
       _pointerDownHitSelection =
           _selectionAt(GraphPoint.fromOffset(sceneOffset));
 
@@ -479,6 +507,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (_shortcutPanPointers.contains(event.pointer)) {
+      return;
+    }
     final start = _pointerDownPosition;
     if (start == null) {
       return;
@@ -548,6 +579,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    if (_shortcutPanPointers.remove(event.pointer)) {
+      return;
+    }
     final start = _pointerDownPosition;
     final wasSinglePointerTap = _activePointerCount == 1 &&
         start != null &&
@@ -616,7 +650,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       if (shouldHandleTap &&
           _isInsideCanvas(sceneOffset) &&
           _shouldFinishFromDoubleClick(sceneOffset)) {
-        _finishWallPath(closeShapeDefault: true);
+        _finishWallPath(closeShapeDefault: true, autoFinish: true);
         _rememberTap(sceneOffset);
         return;
       }
@@ -637,7 +671,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         }
 
         if (_shouldFinishFromDoubleClick(sceneOffset)) {
-          _finishWallPath(closeShapeDefault: true);
+          _finishWallPath(closeShapeDefault: true, autoFinish: true);
           _rememberTap(sceneOffset);
           return;
         }
@@ -715,6 +749,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
+    if (_shortcutPanPointers.remove(event.pointer)) {
+      return;
+    }
     if (_activePointerCount > 0) {
       _activePointerCount -= 1;
     }
@@ -744,6 +781,110 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         sceneOffset.dy >= 0 &&
         sceneOffset.dx <= _canvasSize.width &&
         sceneOffset.dy <= _canvasSize.height;
+  }
+
+  bool _removeLatestDraftPoint() {
+    final startIndex = _activePathStartSegmentIndex;
+    if (_activeWallStart == null || startIndex == null) {
+      return false;
+    }
+
+    if (_selectedTool != CanvasTool.structure &&
+        _selectedTool != CanvasTool.wall &&
+        _selectedTool != CanvasTool.arrow &&
+        _selectedTool != CanvasTool.curve) {
+      return false;
+    }
+
+    if (_wallSegments.length > startIndex) {
+      final removed = _wallSegments.last;
+      setState(() {
+        _wallSegments = _wallSegments.sublist(0, _wallSegments.length - 1);
+        _activeWallStart = removed.start;
+        _pendingCurveControlPoint = null;
+        _previewSegment = null;
+        if (_undoStack.isNotEmpty &&
+            _undoStack.last.kind == _UndoKind.wallSegment) {
+          _undoStack.removeLast();
+        }
+        _canvasStatus = 'Latest plotted point removed';
+      });
+      return true;
+    }
+
+    setState(() {
+      if (_selectedTool == CanvasTool.structure &&
+          _structureStartSnapshot != null) {
+        _applyingHistory = true;
+        _structureStartSnapshot!.restore(this);
+        _applyingHistory = false;
+        _structureStartSnapshot = null;
+        _interaction.setDrawingSession(EditorDrawingSession.idle);
+      } else {
+        _activeWallStart = null;
+        _activePathStartPoint = null;
+        _activePathStartSegmentIndex = null;
+        _pendingCurveControlPoint = null;
+        if (_undoStack.isNotEmpty &&
+            _undoStack.last.kind == _UndoKind.wallStart) {
+          _undoStack.removeLast();
+        }
+      }
+      _previewSegment = null;
+      _canvasStatus = 'First plotted point removed';
+    });
+    return true;
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) {
+      return;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed || keyboard.isMetaPressed) {
+      final factor = math.exp(-event.scrollDelta.dy / 500);
+      _zoomAt(event.localPosition, factor);
+    } else if (keyboard.isAltPressed) {
+      _translateViewport(dx: -event.scrollDelta.dy);
+    } else if (keyboard.isShiftPressed) {
+      _translateViewport(dy: -event.scrollDelta.dy);
+    }
+  }
+
+  void _zoomAt(Offset viewportPoint, double factor) {
+    final currentScale = _transformationController.value.getMaxScaleOnAxis();
+    final nextScale = (currentScale * factor).clamp(0.25, 4.0);
+    final scenePoint = _transformationController.toScene(viewportPoint);
+    final next = Matrix4.identity();
+    next.setEntry(0, 0, nextScale);
+    next.setEntry(1, 1, nextScale);
+    next.setEntry(2, 2, nextScale);
+    next.setEntry(0, 3, viewportPoint.dx - (scenePoint.dx * nextScale));
+    next.setEntry(1, 3, viewportPoint.dy - (scenePoint.dy * nextScale));
+    _transformationController.value = next;
+  }
+
+  void _translateViewport({double dx = 0, double dy = 0}) {
+    final next = _transformationController.value.clone();
+    next.setEntry(0, 3, next.entry(0, 3) + dx);
+    next.setEntry(1, 3, next.entry(1, 3) + dy);
+    _transformationController.value = next;
+  }
+
+  void _centerCanvasInViewport(Size viewportSize) {
+    if (_initialCanvasCentered ||
+        viewportSize.width <= 0 ||
+        viewportSize.height <= 0) {
+      return;
+    }
+    _initialCanvasCentered = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final centered = Matrix4.identity();
+      centered.setEntry(0, 3, (viewportSize.width - _canvasSize.width) / 2);
+      centered.setEntry(1, 3, (viewportSize.height - _canvasSize.height) / 2);
+      _transformationController.value = centered;
+    });
   }
 
   bool _isLayerVisible(_GraphLayer layer) {
@@ -1784,7 +1925,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       }
 
       final distance = _annotations[i].point.distanceTo(point);
-      if (distance <= _dragHitDistance) {
+      final annotation = _annotations[i];
+      final hitRadius = annotation.kind == GraphAnnotationKind.marker
+          ? math.max(_objectHitDistance, 19 * annotation.size)
+          : _objectHitDistance + 4;
+      if (distance <= hitRadius) {
         return i;
       }
     }
@@ -1812,7 +1957,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       final segment = _wallSegments[i];
       final distance = _distanceToSegment(point, segment);
 
-      if (distance <= _dragHitDistance) {
+      if (distance <=
+          math.max(_objectHitDistance, (segment.strokeWidth / 2) + 7)) {
         return i;
       }
     }
@@ -1852,7 +1998,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           stroke.points[p - 1],
           stroke.points[p],
         );
-        if (distance <= _dragHitDistance) {
+        if (distance <=
+            math.max(_objectHitDistance, (stroke.strokeWidth / 2) + 7)) {
           return i;
         }
       }
@@ -1878,10 +2025,17 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         continue;
       }
 
-      final containsPoint = shape.closed
-          ? path.contains(point.offset)
-          : path.getBounds().inflate(12).contains(point.offset);
-      if (containsPoint) {
+      final hasVisibleFill =
+          shape.closed && shape.fillColor != null && shape.fillOpacity > 0.01;
+      final containsPoint = hasVisibleFill && path.contains(point.offset);
+      final nearEdge = shape.segmentIndexes.any((segmentIndex) {
+        if (segmentIndex < 0 || segmentIndex >= _wallSegments.length) {
+          return false;
+        }
+        return _distanceToSegment(point, _wallSegments[segmentIndex]) <=
+            math.max(_objectHitDistance, (shape.borderWidth / 2) + 7);
+      });
+      if (containsPoint || nearEdge) {
         return i;
       }
     }
@@ -2017,7 +2171,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     for (var i = 0; i < handles.length; i += 1) {
       final distance = (point.offset - handles[i]).distance;
-      if (distance <= _dragHitDistance) {
+      if (distance <= _handleHitDistance) {
         return _DragTarget.shapeResize(
           shapeIndex: selectedShapeIndex,
           distance: distance,
@@ -2052,7 +2206,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     final handleCenter = bounds.topCenter - const Offset(0, 28);
     final distance = (point.offset - handleCenter).distance;
-    if (distance > _dragHitDistance) {
+    if (distance > _handleHitDistance) {
       return null;
     }
 
@@ -2075,7 +2229,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     GraphPoint? nearestPoint;
-    var nearestDistance = _dragHitDistance;
+    var nearestDistance = _handleHitDistance;
 
     for (final endpoint in _allMoveableEndpoints) {
       final distance = endpoint.distanceTo(point);
@@ -2806,15 +2960,24 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         .length;
   }
 
-  void _finishWallPath({bool closeShapeDefault = false}) {
+  void _finishWallPath({
+    bool closeShapeDefault = false,
+    bool autoFinish = false,
+  }) {
     if (_selectedTool == CanvasTool.structure) {
       _finishStructurePath();
       return;
     }
-    _finishWallPathAsync(closeShapeDefault: closeShapeDefault);
+    _finishWallPathAsync(
+      closeShapeDefault: closeShapeDefault,
+      autoFinish: autoFinish,
+    );
   }
 
-  Future<void> _finishWallPathAsync({bool closeShapeDefault = false}) async {
+  Future<void> _finishWallPathAsync({
+    bool closeShapeDefault = false,
+    bool autoFinish = false,
+  }) async {
     if (_activeWallStart == null) {
       _showCanvasMessage('No active wall shape to finish');
       return;
@@ -2856,14 +3019,24 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         pathSegmentCount >= 2 &&
         activeWallStart.distanceTo(pathStartPoint) > _minimumWallLength;
     final canCloseShape = pathReturnsToStart || canAddClosingSegment;
-    final result = await _showFinishShapeDialog(
-      canCloseShape: canCloseShape,
-      closeShapeDefault:
-          (closeShapeDefault || pathReturnsToStart) && canCloseShape,
-      defaultName: _selectedDrawingPreset?.kind == GraphDrawingPresetKind.area
-          ? _defaultShapeName(_selectedTool)
-          : 'Shape ${_shapes.length + 1}',
-    );
+    final defaultName = _selectedDrawingPreset?.label ??
+        '${_selectedTool == CanvasTool.wall ? 'Line' : 'Shape'} ${_shapes.length + 1}';
+    final result = autoFinish
+        ? _FinishShapeResult(
+            name: defaultName,
+            closeShape: canCloseShape,
+            fillColor: _currentShapeFillColor,
+            fillOpacity: _currentShapeFillOpacity,
+            borderColor: _currentShapeBorderColor,
+            borderWidth: _currentShapeBorderWidth,
+            pattern: _currentShapePattern,
+          )
+        : await _showFinishShapeDialog(
+            canCloseShape: canCloseShape,
+            closeShapeDefault:
+                (closeShapeDefault || pathReturnsToStart) && canCloseShape,
+            defaultName: defaultName,
+          );
 
     if (!mounted || result == null) {
       return;
@@ -2882,6 +3055,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         final closingSegment = WallSegment(
           start: _activeWallStart!,
           end: _activePathStartPoint!,
+          color: _currentLineColor,
+          strokeWidth: _currentLineWidth,
+          pattern: _currentLinePattern,
         );
         shapeSegmentIndexes.add(_wallSegments.length);
         _wallSegments = <WallSegment>[..._wallSegments, closingSegment];
@@ -2898,9 +3074,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         pattern: result.pattern,
         closed: result.closeShape && canCloseShape,
         rotationDegrees: 0,
-        preset: _selectedDrawingPreset?.kind == GraphDrawingPresetKind.area
-            ? _selectedDrawingPreset
-            : null,
+        preset: _selectedDrawingPreset,
       );
 
       _shapes = <GraphShape>[..._shapes, shape];
@@ -3109,6 +3283,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       },
     );
 
+    // The route is popped before its reverse animation releases the text
+    // field. Disposing immediately can leave that field listening to a dead
+    // controller for one frame.
+    await Future<void>.delayed(kThemeAnimationDuration);
     nameController.dispose();
 
     return result;
@@ -4513,60 +4691,71 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                       top: 54,
                       right: canvasRightInset,
                       bottom: 12,
-                      child: MouseRegion(
-                        cursor: _canvasCursor,
-                        child: Listener(
-                          behavior: HitTestBehavior.opaque,
-                          onPointerDown: _handlePointerDown,
-                          onPointerMove: _handlePointerMove,
-                          onPointerHover: _handlePointerHover,
-                          onPointerUp: _handlePointerUp,
-                          onPointerCancel: _handlePointerCancel,
-                          child: InteractiveViewer(
-                            transformationController: _transformationController,
-                            panEnabled: _selectedTool == CanvasTool.pan,
-                            scaleEnabled: true,
-                            constrained: false,
-                            minScale: 0.25,
-                            maxScale: 4,
-                            boundaryMargin: const EdgeInsets.all(1200),
-                            child: _CanvasSurface(
-                              canvasSize: _canvasSize,
-                              wallSegments: _wallSegments,
-                              annotations: _annotations,
-                              shapes: _shapes,
-                              freehandStrokes: _freehandStrokes,
-                              draftFreehandPoints: _draftFreehandPoints,
-                              previewShapeSegments: _previewShapeSegments,
-                              previewShape: _previewShape,
-                              hiddenSegmentIndexes: _shapeSegmentIndexSet,
-                              gridVisible: _gridVisible,
-                              selectedSegmentIndex: _selection?.segmentIndex,
-                              selectedAnnotationIndex:
-                                  _selection?.annotationIndex,
-                              selectedShapeIndex: _selection?.shapeIndex,
-                              selectedFreehandIndex: _selection?.freehandIndex,
-                              hoveredSegmentIndex:
-                                  _hoverSelection?.segmentIndex,
-                              hoveredAnnotationIndex:
-                                  _hoverSelection?.annotationIndex,
-                              hoveredShapeIndex: _hoverSelection?.shapeIndex,
-                              hoveredFreehandIndex:
-                                  _hoverSelection?.freehandIndex,
-                              activeWallStart: _activeWallStart,
-                              previewSegment: _previewSegment,
-                              structureVisible:
-                                  _isLayerVisible(_GraphLayer.structure),
-                              shapesVisible:
-                                  _isLayerVisible(_GraphLayer.shapes),
-                              findingsVisible:
-                                  _isLayerVisible(_GraphLayer.findings),
-                              photosVisible:
-                                  _isLayerVisible(_GraphLayer.photos),
-                              traceLayerVisible: _traceLayerVisible,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          _centerCanvasInViewport(constraints.biggest);
+                          return MouseRegion(
+                            cursor: _canvasCursor,
+                            child: Listener(
+                              behavior: HitTestBehavior.opaque,
+                              onPointerDown: _handlePointerDown,
+                              onPointerMove: _handlePointerMove,
+                              onPointerHover: _handlePointerHover,
+                              onPointerUp: _handlePointerUp,
+                              onPointerCancel: _handlePointerCancel,
+                              onPointerSignal: _handlePointerSignal,
+                              child: InteractiveViewer(
+                                transformationController:
+                                    _transformationController,
+                                panEnabled: _selectedTool == CanvasTool.pan ||
+                                    _spacePanActive,
+                                scaleEnabled: true,
+                                constrained: false,
+                                minScale: 0.25,
+                                maxScale: 4,
+                                boundaryMargin: const EdgeInsets.all(1200),
+                                child: _CanvasSurface(
+                                  canvasSize: _canvasSize,
+                                  wallSegments: _wallSegments,
+                                  annotations: _annotations,
+                                  shapes: _shapes,
+                                  freehandStrokes: _freehandStrokes,
+                                  draftFreehandPoints: _draftFreehandPoints,
+                                  previewShapeSegments: _previewShapeSegments,
+                                  previewShape: _previewShape,
+                                  hiddenSegmentIndexes: _shapeSegmentIndexSet,
+                                  gridVisible: _gridVisible,
+                                  selectedSegmentIndex:
+                                      _selection?.segmentIndex,
+                                  selectedAnnotationIndex:
+                                      _selection?.annotationIndex,
+                                  selectedShapeIndex: _selection?.shapeIndex,
+                                  selectedFreehandIndex:
+                                      _selection?.freehandIndex,
+                                  hoveredSegmentIndex:
+                                      _hoverSelection?.segmentIndex,
+                                  hoveredAnnotationIndex:
+                                      _hoverSelection?.annotationIndex,
+                                  hoveredShapeIndex:
+                                      _hoverSelection?.shapeIndex,
+                                  hoveredFreehandIndex:
+                                      _hoverSelection?.freehandIndex,
+                                  activeWallStart: _activeWallStart,
+                                  previewSegment: _previewSegment,
+                                  structureVisible:
+                                      _isLayerVisible(_GraphLayer.structure),
+                                  shapesVisible:
+                                      _isLayerVisible(_GraphLayer.shapes),
+                                  findingsVisible:
+                                      _isLayerVisible(_GraphLayer.findings),
+                                  photosVisible:
+                                      _isLayerVisible(_GraphLayer.photos),
+                                  traceLayerVisible: _traceLayerVisible,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
                     ),
                     Positioned(
@@ -5141,6 +5330,9 @@ class _PropertiesSidebar extends StatelessWidget {
               initialValue: annotation.markerType,
               decoration: const InputDecoration(labelText: 'Marker type'),
               items: GraphMarkerType.values
+                  .where((type) =>
+                      type.availableForNewPlacement ||
+                      type == annotation.markerType)
                   .map(
                     (type) => DropdownMenuItem(
                       value: type,
@@ -5384,6 +5576,7 @@ class _PropertiesSidebar extends StatelessWidget {
           const SizedBox(height: 10),
           DropdownButtonFormField<LinePattern>(
             initialValue: segment.pattern,
+            isExpanded: true,
             decoration: const InputDecoration(labelText: 'Line style'),
             items: LinePattern.values
                 .map(

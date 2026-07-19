@@ -14,7 +14,7 @@ enum GraphMarkerCategory {
   moistureFindings('Moisture Findings'),
   structureDetails('Structure Details'),
   treatment('Treatment Markers'),
-  review('Review and Documentation');
+  review('Review');
 
   const GraphMarkerCategory(this.label);
   final String label;
@@ -83,7 +83,7 @@ enum GraphMarkerType {
   triangle('Triangle', 'T', Color(0xFF7048D8)),
   square('Square', 'S', Color(0xFF2E7D55)),
   camera('Camera', 'CAM', Color(0xFF2C6F9F)),
-  woodFungi('W - Wood Destroying Fungi', 'W', Color(0xFF4D7F33)),
+  woodFungi('Wood Destroying Fungi', 'WDF', Color(0xFF4D7F33)),
   oldHouseBorers('OHB - Old House Borers', 'OHB', Color(0xFF6E5332)),
   powderPostBeetles('PPB - Powder Post Beetles', 'PPB', Color(0xFF7A4E8A)),
   treatmentNote('Treatment Note', 'TXT', Color(0xFF222222)),
@@ -92,7 +92,7 @@ enum GraphMarkerType {
   carpenterBeeEvidence('Carpenter Bee Evidence', 'CB', Color(0xFFE0AD19)),
   roachActivity('Roach Activity', 'RO', Color(0xFF6E5332)),
   otherPestEvidence('Other Pest Evidence', 'PE', Color(0xFF7A4E8A)),
-  rot('Rot', 'ROT', Color(0xFF8A5A2B)),
+  rot('Wood Rot', 'ROT', Color(0xFF8A5A2B)),
   woodToGroundContact('Wood-to-Ground Contact', 'WG', Color(0xFFE5792A)),
   foundationCrack('Foundation Crack', 'FC', Color(0xFFD33A2C)),
   plumbingPenetration('Plumbing Penetration', 'PP', Color(0xFF168AAD)),
@@ -127,7 +127,9 @@ enum GraphMarkerType {
   liquidTreatmentZone('Liquid Treatment Zone', 'LT', Color(0xFF245BDB)),
   interiorBaitPlacement('Interior Bait Placement', 'IB', Color(0xFF2E7D55)),
   dustApplication('Dust Application', 'DA', Color(0xFF7A4E8A)),
-  exclusionPoint('Exclusion Point', 'EX', Color(0xFF111111));
+  exclusionPoint('Exclusion Point', 'EX', Color(0xFF111111)),
+  rodentBox('Rodent Box', 'RB', Color(0xFF355C46)),
+  rodentTrap('Rodent Trap', 'RT', Color(0xFFB45F34));
 
   const GraphMarkerType(this.label, this.shortLabel, this.defaultColor);
 
@@ -206,6 +208,8 @@ extension GraphMarkerTypeMetadata on GraphMarkerType {
         GraphMarkerType.interiorBaitPlacement ||
         GraphMarkerType.dustApplication ||
         GraphMarkerType.exclusionPoint ||
+        GraphMarkerType.rodentBox ||
+        GraphMarkerType.rodentTrap ||
         GraphMarkerType.circle ||
         GraphMarkerType.triangle ||
         GraphMarkerType.square =>
@@ -281,6 +285,8 @@ extension GraphMarkerTypeMetadata on GraphMarkerType {
         GraphMarkerType.liquidTreatmentZone =>
           GraphMarkerSymbol.treatment,
         GraphMarkerType.baitStation ||
+        GraphMarkerType.rodentBox ||
+        GraphMarkerType.rodentTrap ||
         GraphMarkerType.interiorBaitPlacement =>
           GraphMarkerSymbol.bait,
         GraphMarkerType.dustApplication => GraphMarkerSymbol.dust,
@@ -298,6 +304,51 @@ extension GraphMarkerTypeMetadata on GraphMarkerType {
           GraphMarkerSymbol.alert,
         _ => GraphMarkerSymbol.insect,
       };
+
+  /// Whether this legacy-compatible type may be placed from the cleaned UI.
+  bool get availableForNewPlacement => !const <GraphMarkerType>{
+        GraphMarkerType.carpenterAntEvidence,
+        GraphMarkerType.carpenterBeeEvidence,
+        GraphMarkerType.roachActivity,
+        GraphMarkerType.otherPestEvidence,
+        GraphMarkerType.conduciveCondition,
+        GraphMarkerType.crawlspaceIssue,
+        GraphMarkerType.woodDecay,
+        GraphMarkerType.entryPoint,
+        GraphMarkerType.termiteActivity,
+        GraphMarkerType.termiteDamage,
+        GraphMarkerType.activeTermites,
+        GraphMarkerType.oldTermiteActivity,
+        GraphMarkerType.oldDamage,
+        GraphMarkerType.damage,
+        GraphMarkerType.foundationCrack,
+        GraphMarkerType.plumbingPenetration,
+        GraphMarkerType.utilityPenetration,
+        GraphMarkerType.expansionJoint,
+        GraphMarkerType.pestEntryPoint,
+        GraphMarkerType.highMoisture,
+        GraphMarkerType.activeLeak,
+        GraphMarkerType.condensation,
+        GraphMarkerType.drainageConcern,
+        GraphMarkerType.accessPoint,
+        GraphMarkerType.vent,
+        GraphMarkerType.door,
+        GraphMarkerType.window,
+        GraphMarkerType.garageDoor,
+        GraphMarkerType.deckSupport,
+        GraphMarkerType.foundationVent,
+        GraphMarkerType.circle,
+        GraphMarkerType.triangle,
+        GraphMarkerType.square,
+        GraphMarkerType.foamApplication,
+        GraphMarkerType.liquidTreatmentZone,
+        GraphMarkerType.interiorBaitPlacement,
+        GraphMarkerType.dustApplication,
+        GraphMarkerType.exclusionPoint,
+        GraphMarkerType.photoPoint,
+        GraphMarkerType.camera,
+        GraphMarkerType.notePoint,
+      }.contains(this);
 }
 
 class GraphAnnotation {

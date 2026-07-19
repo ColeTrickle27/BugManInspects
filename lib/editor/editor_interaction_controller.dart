@@ -18,7 +18,7 @@ enum CanvasTool {
   freehand(Icons.gesture, 'Freehand', 'F'),
   marker(Icons.place_outlined, 'Marker', 'M'),
   photo(Icons.add_a_photo_outlined, 'Photo', 'P'),
-  text(Icons.text_fields, 'Text', 'T');
+  text(Icons.text_fields, 'Inspection Note', 'T');
 
   const CanvasTool(this.icon, this.label, this.shortcut);
 
@@ -69,7 +69,7 @@ class EditorObjectReference {
 class EditorInteractionController extends ChangeNotifier {
   CanvasTool _primaryTool = CanvasTool.select;
   GraphDrawingPreset _structureType = GraphDrawingPreset.mainStructure;
-  GraphMarkerType _markerType = GraphMarkerType.activeTermites;
+  GraphMarkerType _markerType = GraphMarkerType.mudTube;
   EditorDrawingSession _drawingSession = EditorDrawingSession.idle;
   EditorObjectReference? _selectedObject;
   EditorObjectReference? _hoveredObject;

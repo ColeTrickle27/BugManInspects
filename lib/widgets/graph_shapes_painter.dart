@@ -2,6 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../models/graph_shape.dart';
 import '../models/wall_segment.dart';
+import 'wall_segments_painter.dart';
+
+@visibleForTesting
+bool usesStyledSegmentRendering(GraphShape shape) =>
+    shape.preset?.kind == GraphDrawingPresetKind.line;
 
 class GraphShapesPainter extends CustomPainter {
   const GraphShapesPainter({
@@ -27,8 +32,18 @@ class GraphShapesPainter extends CustomPainter {
 
       final path = _pathForShape(shape, shapeSegments);
       final bounds = path.getBounds();
+      final isStyledLine = usesStyledSegmentRendering(shape);
 
-      if (shape.fillColor != null) {
+      if (isStyledLine) {
+        WallSegmentsPainter(
+          segments: shapeSegments,
+          selectedSegmentIndex: null,
+          hoveredSegmentIndex: null,
+          activeWallStart: null,
+          previewSegment: null,
+          drawMeasurements: shape.preset == GraphDrawingPreset.measurementLine,
+        ).paint(canvas, size);
+      } else if (shape.fillColor != null) {
         canvas.drawPath(
           path,
           Paint()
@@ -36,8 +51,10 @@ class GraphShapesPainter extends CustomPainter {
         );
       }
 
-      _drawPattern(canvas, shape.pattern, path, bounds);
-      _drawShapeBorder(canvas, shape, path);
+      if (!isStyledLine) {
+        _drawPattern(canvas, shape.pattern, path, bounds);
+        _drawShapeBorder(canvas, shape, path);
+      }
 
       _drawShapeName(
         canvas,

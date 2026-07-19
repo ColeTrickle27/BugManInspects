@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:bugman_graphs/main.dart';
 import 'package:bugman_graphs/models/job.dart';
 import 'package:bugman_graphs/screens/graph_canvas_screen.dart';
+import 'package:bugman_graphs/widgets/canvas_toolbar.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -163,6 +164,242 @@ void main() {
     expect(find.text('1 overlays'), findsOneWidget);
     expect(find.text('Shape Properties'), findsOneWidget);
   });
+
+  for (final size in const [Size(1440, 900), Size(1024, 768)]) {
+    testWidgets('initial canvas is centered in the usable viewport at $size',
+        (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = size;
+      addTearDown(tester.view.reset);
+      await _pumpEditor(tester);
+
+      final viewer = tester.widget<InteractiveViewer>(
+        find.byType(InteractiveViewer),
+      );
+      final viewport = tester.getSize(find.byType(InteractiveViewer));
+      final matrix = viewer.transformationController!.value;
+
+      expect(matrix.entry(0, 3), closeTo((viewport.width - 3600) / 2, 0.1));
+      expect(matrix.entry(1, 3), closeTo((viewport.height - 2600) / 2, 0.1));
+      expect(find.text('Drawing Tools'), findsOneWidget);
+      expect(find.text('Structures'), findsOneWidget);
+      expect(find.text('Inspection Markers'), findsOneWidget);
+      expect(find.text('Treatment Markers'), findsOneWidget);
+      expect(find.text('Review'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CanvasToolbar),
+          matching: find.text('Shapes'),
+        ),
+        findsNothing,
+      );
+    });
+  }
+
+  testWidgets('Spacebar drag pans without drawing and restores the line tool',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    await tester.tap(find.byTooltip('Line (L)'));
+    await tester.pump();
+
+    final viewerBefore = tester.widget<InteractiveViewer>(
+      find.byType(InteractiveViewer),
+    );
+    final before = viewerBefore.transformationController!.value.clone();
+    final center = tester.getCenter(find.byType(InteractiveViewer));
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    final gesture = await tester.startGesture(
+      center,
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(90, 55));
+    await gesture.up();
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+
+    final after = tester
+        .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+        .transformationController!
+        .value;
+    expect(after.entry(0, 3), isNot(closeTo(before.entry(0, 3), 0.1)));
+    expect(find.text('0 overlays'), findsOneWidget);
+    expect(find.text('0 items'), findsOneWidget);
+
+    await tester.tapAt(center - const Offset(80, 0));
+    await tester.tapAt(center + const Offset(80, 0));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.tapAt(center);
+    await tester.pump();
+    expect(find.text('Line Properties'), findsOneWidget);
+  });
+
+  testWidgets('modifier wheel controls zoom and both scroll axes',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    final center = tester.getCenter(find.byType(InteractiveViewer));
+    Matrix4 matrix() => tester
+        .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+        .transformationController!
+        .value
+        .clone();
+
+    final initial = matrix();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendEventToBinding(PointerScrollEvent(
+      position: center,
+      scrollDelta: const Offset(0, -120),
+      kind: PointerDeviceKind.mouse,
+    ));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(
+        matrix().getMaxScaleOnAxis(), greaterThan(initial.getMaxScaleOnAxis()));
+
+    final beforeAlt = matrix();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendEventToBinding(PointerScrollEvent(
+      position: center,
+      scrollDelta: const Offset(0, 80),
+      kind: PointerDeviceKind.mouse,
+    ));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pump();
+    expect(matrix().entry(0, 3), isNot(closeTo(beforeAlt.entry(0, 3), 0.1)));
+
+    final beforeShift = matrix();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendEventToBinding(PointerScrollEvent(
+      position: center,
+      scrollDelta: const Offset(0, 80),
+      kind: PointerDeviceKind.mouse,
+    ));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    expect(matrix().entry(1, 3), isNot(closeTo(beforeShift.entry(1, 3), 0.1)));
+  });
+
+  testWidgets('line double-click closes and finishes the plotted path',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    await tester.tap(find.byTooltip('Line (L)'));
+    await tester.tapAt(const Offset(320, 260));
+    await tester.tapAt(const Offset(500, 260));
+    await tester.tapAt(const Offset(500, 420));
+    await tester.pump(const Duration(milliseconds: 40));
+    await tester.tapAt(const Offset(500, 420));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 overlays'), findsOneWidget);
+    expect(find.byType(AlertDialog), findsNothing);
+  });
+
+  testWidgets('Finish closes and saves a multi-point line', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    await tester.tap(find.byTooltip('Line (L)'));
+    await tester.tapAt(const Offset(320, 260));
+    await tester.tapAt(const Offset(500, 260));
+    await tester.tapAt(const Offset(500, 420));
+    await tester.tap(find.text('Finish').first);
+    await tester.pumpAndSettle();
+
+    final dialog = find.byType(AlertDialog);
+    expect(dialog, findsOneWidget);
+    await tester.tap(
+      find.descendant(of: dialog, matching: find.text('Finish')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 overlays'), findsOneWidget);
+    expect(find.byType(AlertDialog), findsNothing);
+  });
+
+  testWidgets('Treatment Area plots points and double-click closes the area',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    final picker = find.byTooltip('Treatment Marker: Treatment Area');
+    await tester.ensureVisible(picker);
+    await tester.pumpAndSettle();
+    await tester.tap(picker);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Treatment Area').last);
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(const Offset(300, 240));
+    await tester.tapAt(const Offset(520, 240));
+    await tester.tapAt(const Offset(480, 430));
+    await tester.pump(const Duration(milliseconds: 40));
+    await tester.tapAt(const Offset(480, 430));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 overlays'), findsOneWidget);
+    expect(find.text('Treatment Area'), findsWidgets);
+  });
+
+  testWidgets('right-click removes only the latest unfinished line point',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    await tester.tap(find.byTooltip('Line (L)'));
+    await tester.tapAt(const Offset(320, 260));
+    await tester.tapAt(const Offset(500, 260));
+    await _secondaryClick(tester, const Offset(500, 260));
+    await tester.pump();
+
+    expect(
+      find.byWidgetPredicate((widget) =>
+          widget is Tooltip &&
+          widget.message == 'Latest plotted point removed'),
+      findsOneWidget,
+    );
+    await tester.tapAt(const Offset(500, 300));
+    await tester.tapAt(const Offset(500, 430));
+    await tester.pump(const Duration(milliseconds: 40));
+    await tester.tapAt(const Offset(500, 430));
+    await tester.pumpAndSettle();
+    expect(find.text('1 overlays'), findsOneWidget);
+  });
+
+  testWidgets('thin line selection uses reduced but practical tolerance',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    await tester.tap(find.byTooltip('Line (L)'));
+    await tester.dragFrom(const Offset(320, 300), const Offset(260, 0));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.pump();
+
+    await tester.tapAt(const Offset(450, 326));
+    await tester.pump();
+    expect(find.text('Line Properties'), findsNothing);
+
+    await tester.tapAt(const Offset(450, 306));
+    await tester.pump();
+    expect(find.text('Line Properties'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpEditor(WidgetTester tester) async {
@@ -175,7 +412,16 @@ Future<void> _pumpEditor(WidgetTester tester) async {
     createdDate: DateTime(2026, 7, 18),
   );
   await tester.pumpWidget(MaterialApp(home: GraphCanvasScreen(job: job)));
-  await tester.pump();
+  await tester.pumpAndSettle();
+}
+
+Future<void> _secondaryClick(WidgetTester tester, Offset position) async {
+  final gesture = await tester.createGesture(
+    kind: PointerDeviceKind.mouse,
+    buttons: kSecondaryMouseButton,
+  );
+  await gesture.down(position);
+  await gesture.up();
 }
 
 Future<void> _selectStructure(WidgetTester tester, String label) async {

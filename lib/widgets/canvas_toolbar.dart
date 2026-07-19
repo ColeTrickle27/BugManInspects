@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../editor/editor_interaction_controller.dart';
 import '../models/graph_annotation.dart';
 import '../models/graph_shape.dart';
+import 'graph_marker_visual.dart';
 
 class CanvasToolbar extends StatelessWidget {
   const CanvasToolbar({
@@ -37,7 +38,7 @@ class CanvasToolbar extends StatelessWidget {
         child: SingleChildScrollView(
           child: Column(
             children: [
-              const _ToolbarGroupLabel(label: 'Drawing'),
+              const _ToolbarGroupLabel(label: 'Drawing Tools'),
               for (final tool in const [
                 CanvasTool.select,
                 CanvasTool.pan,
@@ -45,30 +46,7 @@ class CanvasToolbar extends StatelessWidget {
                 CanvasTool.arrow,
                 CanvasTool.curve,
                 CanvasTool.freehand,
-              ]) ...[
-                _ToolButton(
-                  icon: tool.icon,
-                  label: tool.label,
-                  shortcut: tool.shortcut,
-                  selected: selectedTool == tool,
-                  onPressed: () => onToolSelected(tool),
-                ),
-                const SizedBox(height: 8),
-              ],
-              const Divider(height: 18),
-              const _ToolbarGroupLabel(label: 'Structures'),
-              _StructurePickerButton(
-                selectedPreset:
-                    selectedDrawingPreset ?? GraphDrawingPreset.mainStructure,
-                active: selectedTool == CanvasTool.structure,
-                onSelected: onDrawingPresetSelected,
-              ),
-              const SizedBox(height: 8),
-              const Divider(height: 18),
-              const _ToolbarGroupLabel(label: 'Shapes'),
-              for (final tool in const [
                 CanvasTool.rectangle,
-                CanvasTool.square,
                 CanvasTool.circle,
                 CanvasTool.ellipse,
                 CanvasTool.triangle,
@@ -82,11 +60,48 @@ class CanvasToolbar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
               ],
+              _DrawingPresetPickerButton(
+                selectedPreset: selectedDrawingPreset,
+                active: selectedTool == CanvasTool.structure &&
+                    selectedDrawingPreset != null &&
+                    _drawingToolPresets.contains(selectedDrawingPreset),
+                onSelected: onDrawingPresetSelected,
+              ),
+              const SizedBox(height: 8),
               const Divider(height: 18),
-              const _ToolbarGroupLabel(label: 'Markers'),
+              const _ToolbarGroupLabel(label: 'Structures'),
+              _StructurePickerButton(
+                selectedPreset:
+                    selectedDrawingPreset ?? GraphDrawingPreset.mainStructure,
+                active: selectedTool == CanvasTool.structure,
+                onSelected: onDrawingPresetSelected,
+              ),
+              const SizedBox(height: 8),
+              _MarkerToolButton(
+                markerType: GraphMarkerType.pier,
+                selected: selectedTool == CanvasTool.marker &&
+                    selectedMarkerType == GraphMarkerType.pier,
+                onPressed: () => onMarkerSelected(GraphMarkerType.pier),
+              ),
+              const SizedBox(height: 8),
+              const Divider(height: 18),
+              const _ToolbarGroupLabel(label: 'Inspection Markers'),
               _MarkerPickerButton(
+                tooltipLabel: 'Inspection Marker',
                 selectedMarker: selectedMarkerType,
                 active: selectedTool == CanvasTool.marker,
+                markers: _inspectionMarkers,
+                onSelected: onMarkerSelected,
+              ),
+              const SizedBox(height: 8),
+              const Divider(height: 18),
+              const _ToolbarGroupLabel(label: 'Treatment Markers'),
+              _MarkerPickerButton(
+                tooltipLabel: 'Treatment Marker',
+                selectedMarker: selectedMarkerType,
+                active: selectedTool == CanvasTool.marker &&
+                    _treatmentMarkers.contains(selectedMarkerType),
+                markers: _treatmentMarkers,
                 onSelected: onMarkerSelected,
               ),
               const SizedBox(height: 8),
@@ -105,21 +120,6 @@ class CanvasToolbar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
               ],
-              _QuickReviewButton(
-                markerType: GraphMarkerType.treatmentNote,
-                selected: selectedTool == CanvasTool.marker &&
-                    selectedMarkerType == GraphMarkerType.treatmentNote,
-                onPressed: () =>
-                    onMarkerSelected(GraphMarkerType.treatmentNote),
-              ),
-              const SizedBox(height: 8),
-              _QuickReviewButton(
-                markerType: GraphMarkerType.notePoint,
-                selected: selectedTool == CanvasTool.marker &&
-                    selectedMarkerType == GraphMarkerType.notePoint,
-                onPressed: () => onMarkerSelected(GraphMarkerType.notePoint),
-              ),
-              const SizedBox(height: 8),
               const Divider(height: 18),
               _ToolButton(
                 icon: traceLayerVisible ? Icons.layers : Icons.layers_outlined,
@@ -132,6 +132,73 @@ class CanvasToolbar extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+const _drawingToolPresets = <GraphDrawingPreset>[
+  GraphDrawingPreset.propertyLine,
+  GraphDrawingPreset.fenceLine,
+  GraphDrawingPreset.measurementLine,
+];
+
+final _structurePresets = GraphDrawingPreset.values
+    .where((preset) =>
+        preset.kind == GraphDrawingPresetKind.area &&
+        preset != GraphDrawingPreset.treatmentArea)
+    .toList(growable: false);
+
+final _inspectionMarkers = GraphMarkerType.values
+    .where((marker) =>
+        marker.availableForNewPlacement &&
+        marker.category != GraphMarkerCategory.treatment &&
+        marker.category != GraphMarkerCategory.review &&
+        marker != GraphMarkerType.pier)
+    .toList(growable: false);
+
+final _treatmentMarkers = <GraphMarkerType>[
+  GraphMarkerType.treatmentArea,
+  ...GraphMarkerType.values.where((marker) =>
+      marker.availableForNewPlacement &&
+      marker.category == GraphMarkerCategory.treatment &&
+      marker != GraphMarkerType.treatmentArea),
+  GraphMarkerType.treatmentNote,
+];
+
+@visibleForTesting
+List<GraphMarkerType> get availableInspectionMarkers => _inspectionMarkers;
+
+@visibleForTesting
+List<GraphMarkerType> get availableTreatmentMarkers => _treatmentMarkers;
+
+@visibleForTesting
+List<GraphDrawingPreset> get structureToolbarPresets => _structurePresets;
+
+@visibleForTesting
+List<GraphDrawingPreset> get drawingToolbarPresets => _drawingToolPresets;
+
+class _DrawingPresetPickerButton extends StatelessWidget {
+  const _DrawingPresetPickerButton({
+    required this.selectedPreset,
+    required this.active,
+    required this.onSelected,
+  });
+
+  final GraphDrawingPreset? selectedPreset;
+  final bool active;
+  final ValueChanged<GraphDrawingPreset> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayed = _drawingToolPresets.contains(selectedPreset)
+        ? selectedPreset!
+        : GraphDrawingPreset.measurementLine;
+    return _PresetPickerButton(
+      tooltip: 'Drawing Tools',
+      displayedPreset: displayed,
+      presets: _drawingToolPresets,
+      active: active,
+      onSelected: onSelected,
     );
   }
 }
@@ -149,46 +216,74 @@ class _StructurePickerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 56,
-      height: 62,
-      child: PopupMenuButton<GraphDrawingPreset>(
-        tooltip: 'Draw Structure: ${selectedPreset.label}',
-        onSelected: onSelected,
-        constraints: const BoxConstraints(minWidth: 300, maxWidth: 340),
-        itemBuilder: (context) => [
-          for (final preset in GraphDrawingPreset.values)
-            PopupMenuItem(
-              value: preset,
-              child: Row(
-                children: [
-                  _StructureSwatch(preset: preset),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      preset.label,
-                      style: TextStyle(
-                        fontWeight: preset == selectedPreset
-                            ? FontWeight.w800
-                            : FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (preset == selectedPreset)
-                    const Icon(Icons.check, size: 20),
-                ],
-              ),
-            ),
-        ],
-        child: _PickerFace(
-          icon: Icons.account_tree_outlined,
-          label: selectedPreset.shortLabel,
-          color: selectedPreset.defaultBorderColor,
-          active: active,
-        ),
-      ),
+    final displayed = _structurePresets.contains(selectedPreset)
+        ? selectedPreset
+        : GraphDrawingPreset.mainStructure;
+    return _PresetPickerButton(
+      tooltip: 'Draw Structure',
+      displayedPreset: displayed,
+      presets: _structurePresets,
+      active: active,
+      onSelected: onSelected,
     );
   }
+}
+
+class _PresetPickerButton extends StatelessWidget {
+  const _PresetPickerButton({
+    required this.tooltip,
+    required this.displayedPreset,
+    required this.presets,
+    required this.active,
+    required this.onSelected,
+  });
+
+  final String tooltip;
+  final GraphDrawingPreset displayedPreset;
+  final List<GraphDrawingPreset> presets;
+  final bool active;
+  final ValueChanged<GraphDrawingPreset> onSelected;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: 56,
+        height: 62,
+        child: PopupMenuButton<GraphDrawingPreset>(
+          tooltip: '$tooltip: ${displayedPreset.label}',
+          onSelected: onSelected,
+          constraints: const BoxConstraints(minWidth: 300, maxWidth: 340),
+          itemBuilder: (context) => [
+            for (final preset in presets)
+              PopupMenuItem(
+                value: preset,
+                child: Row(
+                  children: [
+                    _StructureSwatch(preset: preset),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        preset.label,
+                        style: TextStyle(
+                          fontWeight: preset == displayedPreset
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (preset == displayedPreset)
+                      const Icon(Icons.check, size: 20),
+                  ],
+                ),
+              ),
+          ],
+          child: _PickerFace(
+            icon: Icons.account_tree_outlined,
+            label: displayedPreset.shortLabel,
+            color: displayedPreset.defaultBorderColor,
+            active: active,
+          ),
+        ),
+      );
 }
 
 class _StructureSwatch extends StatelessWidget {
@@ -221,58 +316,53 @@ class _StructureSwatch extends StatelessWidget {
 
 class _MarkerPickerButton extends StatelessWidget {
   const _MarkerPickerButton({
+    required this.tooltipLabel,
     required this.selectedMarker,
     required this.active,
+    required this.markers,
     required this.onSelected,
   });
 
+  final String tooltipLabel;
   final GraphMarkerType selectedMarker;
   final bool active;
+  final List<GraphMarkerType> markers;
   final ValueChanged<GraphMarkerType> onSelected;
 
   @override
   Widget build(BuildContext context) {
+    final displayedMarker =
+        markers.contains(selectedMarker) ? selectedMarker : markers.first;
     return SizedBox(
       width: 56,
       height: 62,
       child: PopupMenuButton<GraphMarkerType>(
-        tooltip: 'Marker: ${selectedMarker.label}',
+        tooltip: '$tooltipLabel: ${displayedMarker.label}',
         onSelected: onSelected,
         constraints: const BoxConstraints(minWidth: 320, maxWidth: 360),
         itemBuilder: (context) => [
-          for (final category in GraphMarkerCategory.values) ...[
-            PopupMenuItem<GraphMarkerType>(
-              enabled: false,
-              height: 34,
-              child: Text(
-                category.label,
-                style: const TextStyle(fontWeight: FontWeight.w900),
+          for (final marker in markers)
+            PopupMenuItem(
+              value: marker,
+              child: Row(
+                children: [
+                  Icon(
+                    iconForGraphMarker(marker),
+                    color: marker.defaultColor,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(marker.label)),
+                  if (marker == selectedMarker)
+                    const Icon(Icons.check, size: 20),
+                ],
               ),
             ),
-            for (final marker in GraphMarkerType.values
-                .where((item) => item.category == category))
-              PopupMenuItem(
-                value: marker,
-                child: Row(
-                  children: [
-                    Icon(
-                      _iconForMarker(marker),
-                      color: marker.defaultColor,
-                      size: 22,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(marker.label)),
-                    if (marker == selectedMarker)
-                      const Icon(Icons.check, size: 20),
-                  ],
-                ),
-              ),
-          ],
         ],
         child: _PickerFace(
-          icon: _iconForMarker(selectedMarker),
-          label: selectedMarker.shortLabel,
-          color: selectedMarker.defaultColor,
+          icon: iconForGraphMarker(displayedMarker),
+          label: displayedMarker.shortLabel,
+          color: displayedMarker.defaultColor,
           active: active,
         ),
       ),
@@ -322,25 +412,6 @@ class _PickerFace extends StatelessWidget {
   }
 }
 
-class _QuickReviewButton extends StatelessWidget {
-  const _QuickReviewButton({
-    required this.markerType,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final GraphMarkerType markerType;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => _MarkerToolButton(
-        markerType: markerType,
-        selected: selected,
-        onPressed: onPressed,
-      );
-}
-
 IconData _iconForPreset(GraphDrawingPreset preset) => switch (preset) {
       GraphDrawingPreset.mainStructure => Icons.home_work_outlined,
       GraphDrawingPreset.slab => Icons.grid_on,
@@ -355,41 +426,7 @@ IconData _iconForPreset(GraphDrawingPreset preset) => switch (preset) {
       GraphDrawingPreset.propertyLine => Icons.border_style,
       GraphDrawingPreset.fenceLine => Icons.fence,
       GraphDrawingPreset.measurementLine => Icons.straighten,
-    };
-
-IconData _iconForMarker(GraphMarkerType marker) => switch (marker.symbol) {
-      GraphMarkerSymbol.termite => Icons.pest_control_outlined,
-      GraphMarkerSymbol.damage => Icons.handyman_outlined,
-      GraphMarkerSymbol.mudTube => Icons.route_outlined,
-      GraphMarkerSymbol.insect => Icons.bug_report_outlined,
-      GraphMarkerSymbol.rodent => Icons.pets_outlined,
-      GraphMarkerSymbol.moisture => Icons.water_drop_outlined,
-      GraphMarkerSymbol.water => Icons.water_outlined,
-      GraphMarkerSymbol.leak => Icons.plumbing_outlined,
-      GraphMarkerSymbol.fungi => Icons.grass_outlined,
-      GraphMarkerSymbol.crack => Icons.warning_amber_outlined,
-      GraphMarkerSymbol.penetration => Icons.adjust_outlined,
-      GraphMarkerSymbol.access => Icons.meeting_room_outlined,
-      GraphMarkerSymbol.vent => Icons.air_outlined,
-      GraphMarkerSymbol.door => Icons.door_front_door_outlined,
-      GraphMarkerSymbol.window => Icons.window_outlined,
-      GraphMarkerSymbol.steps => Icons.stairs_outlined,
-      GraphMarkerSymbol.hvac => Icons.ac_unit_outlined,
-      GraphMarkerSymbol.utility => Icons.cable_outlined,
-      GraphMarkerSymbol.support => Icons.foundation_outlined,
-      GraphMarkerSymbol.drillVertical => Icons.south_outlined,
-      GraphMarkerSymbol.drillHorizontal => Icons.east_outlined,
-      GraphMarkerSymbol.trench => Icons.linear_scale_outlined,
-      GraphMarkerSymbol.injection => Icons.colorize_outlined,
-      GraphMarkerSymbol.foam => Icons.bubble_chart_outlined,
-      GraphMarkerSymbol.treatment => Icons.science_outlined,
-      GraphMarkerSymbol.bait => Icons.location_on_outlined,
-      GraphMarkerSymbol.dust => Icons.blur_on_outlined,
-      GraphMarkerSymbol.exclusion => Icons.block_outlined,
-      GraphMarkerSymbol.camera => Icons.photo_camera_outlined,
-      GraphMarkerSymbol.note => Icons.note_alt_outlined,
-      GraphMarkerSymbol.alert => Icons.report_problem_outlined,
-      GraphMarkerSymbol.generic => Icons.place_outlined,
+      GraphDrawingPreset.treatmentArea => Icons.select_all_outlined,
     };
 
 class _ToolbarGroupLabel extends StatelessWidget {
@@ -404,8 +441,12 @@ class _ToolbarGroupLabel extends StatelessWidget {
       child: Text(
         label,
         textAlign: TextAlign.center,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: const Color(0xFF666B62),
+              fontSize: 9,
+              height: 1.1,
               fontWeight: FontWeight.w900,
             ),
       ),
@@ -452,26 +493,10 @@ class _MarkerToolButton extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  width: 26,
-                  height: 24,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: markerType.defaultColor,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      markerType.shortLabel,
-                      maxLines: 1,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
+                Icon(
+                  iconForGraphMarker(markerType),
+                  color: markerType.defaultColor,
+                  size: 25,
                 ),
                 const SizedBox(height: 3),
                 Text(

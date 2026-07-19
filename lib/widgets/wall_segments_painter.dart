@@ -263,7 +263,12 @@ class WallSegmentsPainter extends CustomPainter {
     final endpointPaint = Paint()
       ..color = segment.color.withValues(alpha: 0.86);
 
-    canvas.drawPath(buildWallSegmentPath(segment), previewPaint);
+    _drawPatternedPath(
+      canvas,
+      buildWallSegmentPath(segment),
+      segment,
+      previewPaint,
+    );
     if (segment.hasArrow) {
       _drawArrowHead(canvas, segment, previewPaint);
     }

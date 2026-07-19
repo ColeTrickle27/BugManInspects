@@ -153,4 +153,32 @@ void main() {
     expect(restored.annotations.single.markerType.category,
         GraphMarkerCategory.treatment);
   });
+
+  test('older graphs retain marker types removed from new-placement UI', () {
+    final restored = GraphDocument.fromJson({
+      'schemaVersion': 2,
+      'customer': GraphCustomerInfo.fromJob(job).toJson(),
+      'annotations': [
+        {
+          'kind': 'marker',
+          'point': {'x': 42, 'y': 64},
+          'label': 'AT',
+          'markerType': 'activeTermites',
+        },
+        {
+          'kind': 'marker',
+          'point': {'x': 80, 'y': 96},
+          'label': 'CAM',
+          'markerType': 'camera',
+        },
+      ],
+    });
+
+    expect(restored.annotations.map((item) => item.markerType), [
+      GraphMarkerType.activeTermites,
+      GraphMarkerType.camera,
+    ]);
+    final roundTripped = GraphDocument.fromJson(restored.toJson());
+    expect(roundTripped.annotations, hasLength(2));
+  });
 }

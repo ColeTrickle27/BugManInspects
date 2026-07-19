@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/graph_annotation.dart';
+import 'graph_marker_visual.dart';
 
 class GraphAnnotationsPainter extends CustomPainter {
   const GraphAnnotationsPainter({
@@ -88,121 +89,43 @@ class GraphAnnotationsPainter extends CustomPainter {
   void _drawMarker(Canvas canvas, GraphAnnotation annotation) {
     final center = annotation.point.offset;
     final color = annotation.color ?? annotation.markerType.defaultColor;
-    final radius = 15 * annotation.size;
-    final shadowPaint = Paint()..color = const Color.fromRGBO(0, 0, 0, 0.16);
-    final fillPaint = Paint()..color = color;
-    final borderPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
+    final iconSize = 34 * annotation.size;
+    final icon = iconForGraphMarker(annotation.markerType);
 
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(annotation.rotationDegrees * 3.1415926535 / 180);
-    canvas.translate(-center.dx, -center.dy);
-
-    final markerPath = _markerPath(
-      center,
-      radius,
-      annotation.markerType.category,
+    canvas.drawCircle(
+      const Offset(2, 3),
+      iconSize * 0.58,
+      Paint()..color = const Color.fromRGBO(0, 0, 0, 0.14),
     );
-    canvas.drawPath(markerPath.shift(const Offset(2, 3)), shadowPaint);
-    canvas.drawPath(markerPath, fillPaint);
-    canvas.drawPath(markerPath, borderPaint);
-
-    canvas.restore();
-    _drawMarkerText(canvas, center, annotation);
-    _drawSmallLabel(
-        canvas, center + Offset(0, 36 * annotation.size), annotation.label);
-  }
-
-  Path _markerPath(
-    Offset center,
-    double radius,
-    GraphMarkerCategory category,
-  ) {
-    switch (category) {
-      case GraphMarkerCategory.insectFindings:
-        return Path()..addOval(Rect.fromCircle(center: center, radius: radius));
-      case GraphMarkerCategory.structureFindings:
-        return Path()
-          ..moveTo(center.dx, center.dy - radius)
-          ..lineTo(center.dx + radius, center.dy)
-          ..lineTo(center.dx, center.dy + radius)
-          ..lineTo(center.dx - radius, center.dy)
-          ..close();
-      case GraphMarkerCategory.moistureFindings:
-        return Path()
-          ..moveTo(center.dx, center.dy - (radius * 1.15))
-          ..quadraticBezierTo(
-            center.dx + (radius * 1.25),
-            center.dy + (radius * 0.35),
-            center.dx,
-            center.dy + radius,
-          )
-          ..quadraticBezierTo(
-            center.dx - (radius * 1.25),
-            center.dy + (radius * 0.35),
-            center.dx,
-            center.dy - (radius * 1.15),
-          )
-          ..close();
-      case GraphMarkerCategory.structureDetails:
-        return Path()
-          ..addRRect(
-            RRect.fromRectAndRadius(
-              Rect.fromCenter(
-                center: center,
-                width: radius * 2,
-                height: radius * 1.7,
-              ),
-              Radius.circular(radius * 0.28),
-            ),
-          );
-      case GraphMarkerCategory.treatment:
-        return Path()
-          ..moveTo(center.dx, center.dy - radius)
-          ..lineTo(center.dx + (radius * 0.86), center.dy - (radius * 0.5))
-          ..lineTo(center.dx + (radius * 0.86), center.dy + (radius * 0.5))
-          ..lineTo(center.dx, center.dy + radius)
-          ..lineTo(center.dx - (radius * 0.86), center.dy + (radius * 0.5))
-          ..lineTo(center.dx - (radius * 0.86), center.dy - (radius * 0.5))
-          ..close();
-      case GraphMarkerCategory.review:
-        return Path()
-          ..addOval(Rect.fromCircle(center: center, radius: radius))
-          ..moveTo(center.dx - (radius * 0.25), center.dy + (radius * 0.8))
-          ..lineTo(center.dx - (radius * 0.7), center.dy + (radius * 1.35))
-          ..lineTo(center.dx + (radius * 0.25), center.dy + (radius * 0.85))
-          ..close();
-    }
-  }
-
-  void _drawMarkerText(
-      Canvas canvas, Offset center, GraphAnnotation annotation) {
-    final textPainter = TextPainter(
+    canvas.drawCircle(
+      Offset.zero,
+      iconSize * 0.58,
+      Paint()..color = Colors.white,
+    );
+    final iconPainter = TextPainter(
       text: TextSpan(
-        text: annotation.markerType == GraphMarkerType.moisture &&
-                annotation.note.trim().isNotEmpty
-            ? annotation.note
-            : annotation.markerType.shortLabel,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 12,
-          fontWeight: FontWeight.w900,
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          inherit: false,
+          color: color,
+          fontSize: iconSize,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
         ),
       ),
       textDirection: TextDirection.ltr,
-      textAlign: TextAlign.center,
-    )..layout(maxWidth: 46);
-
-    textPainter.paint(
+    )..layout();
+    iconPainter.paint(
       canvas,
-      Offset(
-        center.dx - (textPainter.width / 2),
-        center.dy - (textPainter.height / 2),
-      ),
+      Offset(-iconPainter.width / 2, -iconPainter.height / 2),
     );
+
+    canvas.restore();
+    _drawSmallLabel(
+        canvas, center + Offset(0, 36 * annotation.size), annotation.label);
   }
 
   void _drawPhotoPin(Canvas canvas, GraphAnnotation annotation) {
