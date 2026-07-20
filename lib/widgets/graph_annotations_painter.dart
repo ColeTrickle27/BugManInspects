@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/graph_annotation.dart';
+import '../models/graph_marker_catalog.dart';
 import 'graph_marker_visual.dart';
 
 class GraphAnnotationsPainter extends CustomPainter {
@@ -8,14 +9,18 @@ class GraphAnnotationsPainter extends CustomPainter {
     required this.annotations,
     required this.selectedAnnotationIndex,
     this.hoveredAnnotationIndex,
-    required this.findingsVisible,
+    required this.inspectionsVisible,
+    required this.treatmentVisible,
+    required this.structureVisible,
     required this.photosVisible,
   });
 
   final List<GraphAnnotation> annotations;
   final int? selectedAnnotationIndex;
   final int? hoveredAnnotationIndex;
-  final bool findingsVisible;
+  final bool inspectionsVisible;
+  final bool treatmentVisible;
+  final bool structureVisible;
   final bool photosVisible;
 
   @override
@@ -55,7 +60,15 @@ class GraphAnnotationsPainter extends CustomPainter {
 
   bool _isVisible(GraphAnnotation annotation) {
     return switch (annotation.kind) {
-      GraphAnnotationKind.marker || GraphAnnotationKind.text => findingsVisible,
+      GraphAnnotationKind.marker
+          when utilityMarkerTypes.contains(annotation.markerType) =>
+        structureVisible,
+      GraphAnnotationKind.marker
+          when isTreatmentMarker(annotation.markerType) =>
+        treatmentVisible,
+      GraphAnnotationKind.marker ||
+      GraphAnnotationKind.text =>
+        inspectionsVisible,
       GraphAnnotationKind.photo => photosVisible,
     };
   }
@@ -146,6 +159,29 @@ class GraphAnnotationsPainter extends CustomPainter {
     canvas.drawRRect(rrect, borderPaint);
     canvas.drawCircle(center, 8, Paint()..color = Colors.white);
     canvas.drawCircle(center, 4, Paint()..color = const Color(0xFF2C6F9F));
+    if (annotation.attachmentIds.length > 1) {
+      final badgeCenter = rect.topRight + const Offset(2, -2);
+      canvas.drawCircle(
+        badgeCenter,
+        11,
+        Paint()..color = const Color(0xFFCC2000),
+      );
+      final badgeText = TextPainter(
+        text: TextSpan(
+          text: '${annotation.attachmentIds.length}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      badgeText.paint(
+        canvas,
+        badgeCenter - Offset(badgeText.width / 2, badgeText.height / 2),
+      );
+    }
     _drawSmallLabel(canvas, center + const Offset(0, 32), annotation.label);
   }
 
@@ -219,7 +255,9 @@ class GraphAnnotationsPainter extends CustomPainter {
     return oldDelegate.annotations != annotations ||
         oldDelegate.selectedAnnotationIndex != selectedAnnotationIndex ||
         oldDelegate.hoveredAnnotationIndex != hoveredAnnotationIndex ||
-        oldDelegate.findingsVisible != findingsVisible ||
+        oldDelegate.inspectionsVisible != inspectionsVisible ||
+        oldDelegate.treatmentVisible != treatmentVisible ||
+        oldDelegate.structureVisible != structureVisible ||
         oldDelegate.photosVisible != photosVisible;
   }
 }

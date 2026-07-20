@@ -315,7 +315,8 @@ extension GraphMarkerTypeMetadata on GraphMarkerType {
         GraphMarkerType.crawlspaceIssue,
         GraphMarkerType.woodDecay,
         GraphMarkerType.entryPoint,
-        GraphMarkerType.termiteActivity,
+        GraphMarkerType.moistureReading,
+        GraphMarkerType.generalPestActivity,
         GraphMarkerType.termiteDamage,
         GraphMarkerType.activeTermites,
         GraphMarkerType.oldTermiteActivity,
@@ -353,6 +354,7 @@ extension GraphMarkerTypeMetadata on GraphMarkerType {
 
 class GraphAnnotation {
   const GraphAnnotation({
+    this.id = '',
     required this.kind,
     required this.point,
     required this.label,
@@ -368,8 +370,10 @@ class GraphAnnotation {
     this.backgroundColor = const Color(0xFFFFF2B8),
     this.borderColor = const Color(0xFFC7A93C),
     this.extraProperties = const <String, Object?>{},
+    this.attachmentIds = const <String>[],
   });
 
+  final String id;
   final GraphAnnotationKind kind;
   final GraphPoint point;
   final String label;
@@ -385,8 +389,10 @@ class GraphAnnotation {
   final Color backgroundColor;
   final Color borderColor;
   final Map<String, Object?> extraProperties;
+  final List<String> attachmentIds;
 
   GraphAnnotation copyWith({
+    String? id,
     GraphAnnotationKind? kind,
     GraphPoint? point,
     String? label,
@@ -403,8 +409,10 @@ class GraphAnnotation {
     Color? backgroundColor,
     Color? borderColor,
     Map<String, Object?>? extraProperties,
+    List<String>? attachmentIds,
   }) {
     return GraphAnnotation(
+      id: id ?? this.id,
       kind: kind ?? this.kind,
       point: point ?? this.point,
       label: label ?? this.label,
@@ -420,6 +428,7 @@ class GraphAnnotation {
       backgroundColor: backgroundColor ?? this.backgroundColor,
       borderColor: borderColor ?? this.borderColor,
       extraProperties: extraProperties ?? this.extraProperties,
+      attachmentIds: attachmentIds ?? this.attachmentIds,
     );
   }
 }

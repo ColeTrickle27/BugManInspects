@@ -8,14 +8,20 @@ import 'package:flutter/services.dart';
 import '../editor/editor_interaction_controller.dart';
 import '../models/graph_annotation.dart';
 import '../models/graph_document.dart';
+import '../models/graph_marker_catalog.dart';
 import '../models/freehand_stroke.dart';
 import '../models/graph_point.dart';
 import '../models/graph_shape.dart';
 import '../models/job.dart';
 import '../models/wall_segment.dart';
 import '../services/export_bounds_calculator.dart';
+import '../services/graph_export_legend.dart';
 import '../services/graph_image_export.dart';
 import '../services/graph_pdf_export.dart';
+import '../services/graph_photo_service.dart';
+import '../services/graph_photo_picker_factory.dart';
+import '../services/graph_repository.dart';
+import '../services/graph_repository_stub.dart';
 import '../widgets/canvas_toolbar.dart';
 import '../widgets/freehand_strokes_painter.dart';
 import '../widgets/graph_export_downloader.dart';
@@ -26,13 +32,19 @@ import '../widgets/wall_segments_painter.dart';
 
 class GraphCanvasScreen extends StatefulWidget {
   const GraphCanvasScreen({
-    required this.job,
+    this.job,
+    this.document,
+    this.repository,
+    this.photoPicker,
     super.key,
-  });
+  }) : assert(job != null || document != null);
 
   static const String routeName = '/graph-canvas';
 
-  final Job job;
+  final Job? job;
+  final GraphDocument? document;
+  final GraphRepository? repository;
+  final GraphPhotoPicker? photoPicker;
 
   @override
   State<GraphCanvasScreen> createState() => _GraphCanvasScreenState();
@@ -55,6 +67,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   final TransformationController _transformationController =
       TransformationController();
   late final GraphDocument _document;
+  late final GraphRepository _repository;
+  late final GraphPhotoPicker _photoPicker;
+  final Map<String, Uint8List> _pendingPhotoBlobs = {};
+  final Set<String> _deletedPhotoBlobKeys = {};
   late final EditorInteractionController _interaction;
   final List<_UndoEntry> _undoStack = <_UndoEntry>[];
   final List<_RedoEntry> _redoStack = <_RedoEntry>[];
@@ -169,7 +185,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   @override
   void initState() {
     super.initState();
-    _document = GraphDocument.forJob(widget.job);
+    _document = widget.document ?? GraphDocument.forJob(widget.job!);
+    _repository = widget.repository ?? MemoryGraphRepository();
+    _photoPicker = widget.photoPicker ?? createGraphPhotoPicker();
     _interaction = EditorInteractionController();
     _document.addListener(_handleDocumentChanged);
   }
@@ -690,11 +708,21 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     if (_pointerDownHitSelection != null) {
       if (wasSinglePointerTap && _isDoubleClickNearLastTap(sceneOffset)) {
-        if (_selectionOpensPropertiesOnDoubleClick(_pointerDownHitSelection!)) {
+        final hitSelection = _pointerDownHitSelection!;
+        if (hitSelection.kind == _SelectionKind.annotation) {
+          final annotation = _annotations[hitSelection.index];
+          if (annotation.kind == GraphAnnotationKind.photo) {
+            _showPhotoGallery(annotation);
+            _resetPointerGesture();
+            _rememberTap(sceneOffset);
+            return;
+          }
+        }
+        if (_selectionOpensPropertiesOnDoubleClick(hitSelection)) {
           setState(() {
             _sidePanelMode = _SidePanelMode.properties;
             _canvasStatus =
-                '${_selectionStatus(_pointerDownHitSelection!)} • Properties shown';
+                '${_selectionStatus(hitSelection)} • Properties shown';
           });
           _resetPointerGesture();
           _rememberTap(sceneOffset);
@@ -844,8 +872,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return false;
     }
 
-    if (_isLayerLocked(_GraphLayer.findings)) {
-      _showCanvasMessage('Findings layer is locked');
+    if (_isLayerLocked(_GraphLayer.inspections)) {
+      _showCanvasMessage('Inspections layer is locked');
       return true;
     }
 
@@ -1028,7 +1056,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   _GraphLayer _layerForAnnotation(GraphAnnotation annotation) {
     return annotation.kind == GraphAnnotationKind.photo
         ? _GraphLayer.photos
-        : _GraphLayer.findings;
+        : annotation.kind == GraphAnnotationKind.marker &&
+                isTreatmentMarker(annotation.markerType)
+            ? _GraphLayer.treatment
+            : annotation.kind == GraphAnnotationKind.marker &&
+                    utilityMarkerTypes.contains(annotation.markerType)
+                ? _GraphLayer.structure
+                : _GraphLayer.inspections;
   }
 
   _GraphLayer _layerForSelection(_Selection selection) {
@@ -1037,7 +1071,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           _annotations[selection.index],
         ),
       _SelectionKind.segment => _GraphLayer.structure,
-      _SelectionKind.shape => _GraphLayer.shapes,
+      _SelectionKind.shape => _isTreatmentShape(_shapes[selection.index])
+          ? _GraphLayer.treatment
+          : _GraphLayer.structure,
       _SelectionKind.freehand => _GraphLayer.structure,
     };
   }
@@ -1049,12 +1085,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     if (selection.kind == _SelectionKind.shape) {
+      if (_isTreatmentShape(_shapes[selection.index])) {
+        return !_isLayerLocked(_GraphLayer.treatment);
+      }
       return !_isLayerLocked(_GraphLayer.shapes) &&
           !_isLayerLocked(_GraphLayer.structure);
     }
 
     return !_isLayerLocked(_layerForSelection(selection));
   }
+
+  bool _isTreatmentShape(GraphShape shape) =>
+      shape.preset == GraphDrawingPreset.treatmentArea;
 
   void _updatePreviewSegment(Offset sceneOffset) {
     final activeStart = _activeWallStart;
@@ -1444,9 +1486,17 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _addStructurePoint(Offset canvasOffset) {
-    if (_isLayerLocked(_GraphLayer.structure) ||
-        _isLayerLocked(_GraphLayer.shapes)) {
-      _showCanvasMessage('Unlock Structure and Shapes to draw a structure');
+    final isTreatmentArea =
+        _selectedStructureType == GraphDrawingPreset.treatmentArea;
+    if ((isTreatmentArea && _isLayerLocked(_GraphLayer.treatment)) ||
+        (!isTreatmentArea &&
+            (_isLayerLocked(_GraphLayer.structure) ||
+                _isLayerLocked(_GraphLayer.shapes)))) {
+      _showCanvasMessage(
+        isTreatmentArea
+            ? 'Unlock Treatment to draw a treatment area'
+            : 'Unlock Building Structure to draw a structure',
+      );
       return;
     }
 
@@ -1483,8 +1533,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     setState(() {
       _wallSegments = <WallSegment>[..._wallSegments, segment];
       _activeWallStart = nextPoint;
-      _canvasStatus =
-          '${_selectedStructureType.label}: corner placed â€¢ Finish, Enter, or double-click';
+      _canvasStatus = '${_selectedStructureType.label}: corner placed • '
+          'Finish, Enter, or double-click';
     });
   }
 
@@ -2136,12 +2186,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   int? _shapeIndexAt(GraphPoint point) {
-    if (!_isLayerVisible(_GraphLayer.shapes)) {
+    if (!_isLayerVisible(_GraphLayer.shapes) &&
+        !_isLayerVisible(_GraphLayer.treatment)) {
       return null;
     }
 
     for (var i = _shapes.length - 1; i >= 0; i -= 1) {
       final shape = _shapes[i];
+      final visible = _isTreatmentShape(shape)
+          ? _isLayerVisible(_GraphLayer.treatment)
+          : _isLayerVisible(_GraphLayer.structure) &&
+              _isLayerVisible(_GraphLayer.shapes);
+      if (!visible) continue;
       final path = _shapePath(shape);
       if (path == null) {
         continue;
@@ -2244,7 +2300,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           annotationIndex: selection.index,
           distance: _annotations[selection.index].point.distanceTo(point),
         ),
-      _SelectionKind.shape => _nearestShapeResizeTarget(point) ??
+      _SelectionKind.shape => _nearestShapeVertexTarget(point) ??
+          _nearestShapeResizeTarget(point) ??
           _nearestShapeRotationTarget(point) ??
           _DragTarget.shape(
             shapeIndex: selection.index,
@@ -2265,19 +2322,63 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     };
   }
 
-  _DragTarget? _nearestShapeResizeTarget(GraphPoint point) {
-    if (!_isLayerVisible(_GraphLayer.shapes) ||
-        _isLayerLocked(_GraphLayer.shapes) ||
-        _isLayerLocked(_GraphLayer.structure)) {
-      return null;
-    }
-
+  _DragTarget? _nearestShapeVertexTarget(GraphPoint point) {
     final selectedShapeIndex = _selection?.shapeIndex;
     if (selectedShapeIndex == null ||
         selectedShapeIndex < 0 ||
         selectedShapeIndex >= _shapes.length) {
       return null;
     }
+    final shape = _shapes[selectedShapeIndex];
+    if (!shape.isStructure || !_shapeCanBeEdited(shape)) {
+      return null;
+    }
+
+    GraphPoint? nearest;
+    var nearestDistance = _handleHitDistance;
+    for (final segmentIndex in _uniqueShapeSegmentIndexes(shape)) {
+      if (segmentIndex < 0 || segmentIndex >= _wallSegments.length) continue;
+      final segment = _wallSegments[segmentIndex];
+      for (final candidate in [segment.start, segment.end]) {
+        final distance = candidate.distanceTo(point);
+        if (distance < nearestDistance) {
+          nearest = candidate;
+          nearestDistance = distance;
+        }
+      }
+    }
+    if (nearest == null) return null;
+
+    final refs = <_SegmentEndpointRef>[];
+    for (final segmentIndex in _uniqueShapeSegmentIndexes(shape)) {
+      if (segmentIndex < 0 || segmentIndex >= _wallSegments.length) continue;
+      final segment = _wallSegments[segmentIndex];
+      if (_pointMatches(segment.start, nearest)) {
+        refs.add(
+            _SegmentEndpointRef(segmentIndex: segmentIndex, isStart: true));
+      }
+      if (_pointMatches(segment.end, nearest)) {
+        refs.add(
+            _SegmentEndpointRef(segmentIndex: segmentIndex, isStart: false));
+      }
+    }
+    return _DragTarget.wallEndpoint(
+      endpointRefs: refs,
+      movesActiveWallStart: false,
+      movesActivePathStart: false,
+      originalPoint: nearest,
+      distance: nearestDistance,
+    );
+  }
+
+  _DragTarget? _nearestShapeResizeTarget(GraphPoint point) {
+    final selectedShapeIndex = _selection?.shapeIndex;
+    if (selectedShapeIndex == null ||
+        selectedShapeIndex < 0 ||
+        selectedShapeIndex >= _shapes.length) {
+      return null;
+    }
+    if (!_shapeCanBeEdited(_shapes[selectedShapeIndex])) return null;
 
     final bounds = _shapeBounds(_shapes[selectedShapeIndex]);
     if (bounds == null) {
@@ -2308,18 +2409,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   _DragTarget? _nearestShapeRotationTarget(GraphPoint point) {
-    if (!_isLayerVisible(_GraphLayer.shapes) ||
-        _isLayerLocked(_GraphLayer.shapes) ||
-        _isLayerLocked(_GraphLayer.structure)) {
-      return null;
-    }
-
     final selectedShapeIndex = _selection?.shapeIndex;
     if (selectedShapeIndex == null ||
         selectedShapeIndex < 0 ||
         selectedShapeIndex >= _shapes.length) {
       return null;
     }
+    if (!_shapeCanBeEdited(_shapes[selectedShapeIndex])) return null;
 
     final bounds = _shapeBounds(_shapes[selectedShapeIndex]);
     if (bounds == null) {
@@ -2343,6 +2439,17 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       ),
       originalRotationDegrees: _shapes[selectedShapeIndex].rotationDegrees,
     );
+  }
+
+  bool _shapeCanBeEdited(GraphShape shape) {
+    if (_isTreatmentShape(shape)) {
+      return _isLayerVisible(_GraphLayer.treatment) &&
+          !_isLayerLocked(_GraphLayer.treatment);
+    }
+    return _isLayerVisible(_GraphLayer.structure) &&
+        _isLayerVisible(_GraphLayer.shapes) &&
+        !_isLayerLocked(_GraphLayer.structure) &&
+        !_isLayerLocked(_GraphLayer.shapes);
   }
 
   _DragTarget? _nearestEndpointTarget(GraphPoint point) {
@@ -2822,8 +2929,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _showCanvasMessage(
         layer == _GraphLayer.photos
             ? 'Photos layer is locked'
-            : 'Findings layer is locked',
+            : '${_layerLabel(layer)} layer is locked',
       );
+      return;
+    }
+
+    if (annotation.kind == GraphAnnotationKind.photo) {
+      await _addPhotoMarker(tappedPoint);
       return;
     }
 
@@ -2836,7 +2948,19 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       if (!mounted || moisture == null) {
         return;
       }
-      annotation = annotation.copyWith(label: moisture, note: moisture);
+      final value = double.tryParse(moisture.replaceAll('%', '').trim());
+      if (value == null || value < 0) {
+        _showCanvasMessage('Enter a valid moisture percentage');
+        return;
+      }
+      final formatted = value == value.roundToDouble()
+          ? '${value.round()}%'
+          : '${value.toStringAsFixed(1)}%';
+      annotation = annotation.copyWith(
+        label: formatted,
+        note: formatted,
+        color: moistureMarkerColor(value),
+      );
     } else if (annotation.kind == GraphAnnotationKind.marker &&
         annotation.markerType == GraphMarkerType.treatmentNote) {
       final note = await _showTextLabelDialog(
@@ -2857,8 +2981,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   Future<void> _handleTextTap(Offset canvasOffset) async {
-    if (_isLayerLocked(_GraphLayer.findings)) {
-      _showCanvasMessage('Findings layer is locked');
+    if (_isLayerLocked(_GraphLayer.inspections)) {
+      _showCanvasMessage('Inspections layer is locked');
       return;
     }
 
@@ -3420,6 +3544,21 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _undoLastAction() {
+    if (_pendingCurveControlPoint != null && _activeWallStart != null) {
+      setState(() {
+        _pendingCurveControlPoint = null;
+        _previewSegment = null;
+        _canvasStatus = 'Curve bend point removed';
+      });
+      return;
+    }
+
+    if (_selectedTool == CanvasTool.structure &&
+        _interaction.drawingSession == EditorDrawingSession.plottingStructure) {
+      _removeLastStructurePoint();
+      return;
+    }
+
     if (_undoStack.isEmpty) {
       _showCanvasMessage('Nothing to undo');
       return;
@@ -3999,18 +4138,29 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   bool _hasLockedContent() {
     final structureLocked = _isLayerLocked(_GraphLayer.structure) &&
         (_wallSegments.isNotEmpty || _freehandStrokes.isNotEmpty);
-    final shapesLocked =
-        _isLayerLocked(_GraphLayer.shapes) && _shapes.isNotEmpty;
-    final findingsLocked = _isLayerLocked(_GraphLayer.findings) &&
+    final shapesLocked = _isLayerLocked(_GraphLayer.shapes) &&
+        _shapes.any((shape) => !_isTreatmentShape(shape));
+    final inspectionsLocked = _isLayerLocked(_GraphLayer.inspections) &&
         _annotations.any(
-          (annotation) => annotation.kind != GraphAnnotationKind.photo,
+          (annotation) =>
+              _layerForAnnotation(annotation) == _GraphLayer.inspections,
         );
+    final treatmentLocked = _isLayerLocked(_GraphLayer.treatment) &&
+        (_annotations.any(
+              (annotation) =>
+                  _layerForAnnotation(annotation) == _GraphLayer.treatment,
+            ) ||
+            _shapes.any(_isTreatmentShape));
     final photosLocked = _isLayerLocked(_GraphLayer.photos) &&
         _annotations.any(
           (annotation) => annotation.kind == GraphAnnotationKind.photo,
         );
 
-    return structureLocked || shapesLocked || findingsLocked || photosLocked;
+    return structureLocked ||
+        shapesLocked ||
+        inspectionsLocked ||
+        treatmentLocked ||
+        photosLocked;
   }
 
   void _showCanvasMessage(String message) {
@@ -4051,6 +4201,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       final current = _layerSettings[layer] ?? const _LayerSettings();
       final nextVisible = !current.visible;
       _setLayerSettings(layer, current.copyWith(visible: nextVisible));
+      if (layer == _GraphLayer.structure) {
+        final shapes =
+            _layerSettings[_GraphLayer.shapes] ?? const _LayerSettings();
+        _setLayerSettings(
+          _GraphLayer.shapes,
+          shapes.copyWith(visible: nextVisible),
+        );
+      }
 
       final selection = _selection;
       if (!nextVisible &&
@@ -4069,6 +4227,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       final current = _layerSettings[layer] ?? const _LayerSettings();
       final nextLocked = !current.locked;
       _setLayerSettings(layer, current.copyWith(locked: nextLocked));
+      if (layer == _GraphLayer.structure) {
+        final shapes =
+            _layerSettings[_GraphLayer.shapes] ?? const _LayerSettings();
+        _setLayerSettings(
+          _GraphLayer.shapes,
+          shapes.copyWith(locked: nextLocked),
+        );
+      }
       _canvasStatus =
           '${_layerLabel(layer)} layer ${nextLocked ? 'locked' : 'unlocked'}';
     });
@@ -4081,12 +4247,259 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     );
   }
 
-  void _saveDocument() {
-    setState(() {
-      _document.markClean();
-      _canvasStatus = 'All changes saved';
-    });
-    _showCanvasMessage('Graph saved');
+  Future<void> _saveDocument() async {
+    try {
+      final referencedAttachmentIds =
+          _annotations.expand((annotation) => annotation.attachmentIds).toSet();
+      final retainedAttachments = _document.attachments
+          .where(
+              (attachment) => referencedAttachmentIds.contains(attachment.id))
+          .toList();
+      for (final attachment in _document.attachments) {
+        if (!referencedAttachmentIds.contains(attachment.id)) {
+          _pendingPhotoBlobs.remove(attachment.blobKey);
+          _pendingPhotoBlobs.remove(attachment.thumbnailKey);
+          _deletedPhotoBlobKeys
+            ..add(attachment.blobKey)
+            ..add(attachment.thumbnailKey);
+        }
+      }
+      if (retainedAttachments.length != _document.attachments.length) {
+        _document.replaceAttachments(retainedAttachments);
+      }
+      await _repository.saveGraph(
+        _document,
+        blobs: _pendingPhotoBlobs,
+        deletedBlobKeys: _deletedPhotoBlobKeys,
+      );
+      if (!mounted) return;
+      setState(() {
+        _document.markClean();
+        _pendingPhotoBlobs.clear();
+        _deletedPhotoBlobKeys.clear();
+        _canvasStatus = 'Saved on this device';
+      });
+      _showCanvasMessage('Graph saved on this device');
+    } catch (error) {
+      if (!mounted) return;
+      _showCanvasMessage('Graph could not be saved: $error');
+    }
+  }
+
+  Future<void> _addPhotoMarker(GraphPoint point) async {
+    final source = await showModalBottomSheet<_PhotoSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            const ListTile(
+              title: Text('Add photos'),
+              subtitle: Text('Multiple images can be attached to one pin.'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose Photos or Files'),
+              subtitle: const Text('Select one or more images'),
+              onTap: () => Navigator.pop(context, _PhotoSource.files),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(context, _PhotoSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.close),
+              title: const Text('Cancel'),
+              onTap: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || source == null) return;
+
+    try {
+      late final List<PickedGraphPhoto> picked;
+      if (source == _PhotoSource.files) {
+        picked = await _photoPicker.chooseMultiple();
+      } else {
+        final captured = await _photoPicker.capture();
+        picked = captured == null ? <PickedGraphPhoto>[] : [captured];
+      }
+      if (!mounted || picked.isEmpty) return;
+
+      final annotationId = newGraphId();
+      final optimized = <OptimizedGraphPhoto>[];
+      for (final photo in picked) {
+        optimized.add(
+          await Future(
+            () => optimizeGraphPhoto(
+              source: photo,
+              annotationId: annotationId,
+              attachmentId: newGraphId(),
+            ),
+          ),
+        );
+      }
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(
+            optimized.length == 1
+                ? 'Add this photo?'
+                : 'Add ${optimized.length} photos?',
+          ),
+          content: SizedBox(
+            width: 520,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final photo in optimized)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.memory(
+                      photo.thumbnailBytes,
+                      width: 112,
+                      height: 84,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Add to Graph'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || confirmed != true) return;
+
+      final attachments = optimized.map((item) => item.attachment).toList();
+      final annotation = GraphAnnotation(
+        id: annotationId,
+        kind: GraphAnnotationKind.photo,
+        point: point,
+        label: optimized.length == 1 ? 'Photo' : '${optimized.length} Photos',
+        markerType: GraphMarkerType.camera,
+        attachmentIds: attachments.map((item) => item.id).toList(),
+      );
+      setState(() {
+        _annotations = [..._annotations, annotation];
+        _document
+            .replaceAttachments([..._document.attachments, ...attachments]);
+        for (final photo in optimized) {
+          _pendingPhotoBlobs[photo.attachment.blobKey] = photo.bytes;
+          _pendingPhotoBlobs[photo.attachment.thumbnailKey] =
+              photo.thumbnailBytes;
+        }
+        _undoStack.add(const _UndoEntry(_UndoKind.annotation));
+        _canvasStatus = '${optimized.length} photo(s) added';
+      });
+    } catch (error) {
+      if (mounted) _showCanvasMessage('Photos could not be added: $error');
+    }
+  }
+
+  Future<void> _showPhotoGallery(GraphAnnotation annotation) async {
+    final attachmentIds = annotation.attachmentIds.toSet();
+    final attachments = _document.attachments
+        .where((attachment) => attachmentIds.contains(attachment.id))
+        .toList(growable: false);
+    if (attachments.isEmpty) {
+      _showCanvasMessage('No photos are attached to this pin');
+      return;
+    }
+
+    final photos = <({GraphAttachment attachment, Uint8List? bytes})>[];
+    for (final attachment in attachments) {
+      final bytes = _pendingPhotoBlobs[attachment.blobKey] ??
+          await _repository.loadBlob(attachment.blobKey);
+      photos.add((attachment: attachment, bytes: bytes));
+    }
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760, maxHeight: 720),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        attachments.length == 1
+                            ? 'Photo attachment'
+                            : '${attachments.length} photo attachments',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close photos',
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: photos.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 16),
+                  itemBuilder: (context, index) {
+                    final photo = photos[index];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          photo.attachment.name,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 8),
+                        if (photo.bytes case final bytes?)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.memory(
+                              bytes,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => const Padding(
+                                padding: EdgeInsets.all(24),
+                                child:
+                                    Text('This photo could not be displayed.'),
+                              ),
+                            ),
+                          )
+                        else
+                          const Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Text('This photo is no longer available.'),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _togglePropertiesCollapsed() {
@@ -4127,9 +4540,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   String _layerLabel(_GraphLayer layer) {
     return switch (layer) {
-      _GraphLayer.structure => 'Structure',
+      _GraphLayer.structure => 'Building Structure',
       _GraphLayer.shapes => 'Shapes',
-      _GraphLayer.findings => 'Findings',
+      _GraphLayer.inspections => 'Inspections',
+      _GraphLayer.treatment => 'Treatment',
       _GraphLayer.photos => 'Photos',
       _GraphLayer.trace => 'Trace',
     };
@@ -4233,7 +4647,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _document,
         canvasSize: _canvasSize,
       );
-      final pngBytes = await GraphImageExport.capturePng(boundary, bounds);
+      final legend = buildGraphLegend(_annotations, shapes: _shapes);
+      final pngBytes = await GraphImageExport.capturePng(
+        boundary,
+        bounds,
+        legend: format == _GraphExportFormat.png ? legend : const [],
+      );
       final safeName = _document.customer.name
           .replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '-')
           .replaceAll(RegExp(r'^-+|-+$'), '');
@@ -4248,6 +4667,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
               graphPng: pngBytes,
               title: _document.customer.displayName,
               calibration: _document.measurementCalibration,
+              legend: legend,
             ),
             '$baseName-graph.pdf',
             'application/pdf',
@@ -5018,10 +5438,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                                     previewSegment: _previewSegment,
                                     structureVisible:
                                         _isLayerVisible(_GraphLayer.structure),
-                                    shapesVisible:
+                                    shapesVisible: _isLayerVisible(
+                                            _GraphLayer.structure) &&
                                         _isLayerVisible(_GraphLayer.shapes),
-                                    findingsVisible:
-                                        _isLayerVisible(_GraphLayer.findings),
+                                    inspectionsVisible: _isLayerVisible(
+                                        _GraphLayer.inspections),
+                                    treatmentVisible:
+                                        _isLayerVisible(_GraphLayer.treatment),
                                     photosVisible:
                                         _isLayerVisible(_GraphLayer.photos),
                                     traceLayerVisible: _traceLayerVisible,
@@ -5642,10 +6065,28 @@ class _PropertiesSidebar extends StatelessWidget {
                 child: SingleChildScrollView(
                   child: _LayersPanel(
                     wallCount: wallSegments.length,
-                    shapeCount: shapes.length,
-                    itemCount: annotations
-                        .where((item) => item.kind != GraphAnnotationKind.photo)
+                    shapeCount: shapes
+                        .where((shape) =>
+                            shape.preset != GraphDrawingPreset.treatmentArea)
                         .length,
+                    inspectionCount: annotations
+                        .where((item) =>
+                            item.kind != GraphAnnotationKind.photo &&
+                            !(item.kind == GraphAnnotationKind.marker &&
+                                (isTreatmentMarker(item.markerType) ||
+                                    utilityMarkerTypes
+                                        .contains(item.markerType))))
+                        .length,
+                    treatmentCount: annotations
+                            .where((item) =>
+                                item.kind == GraphAnnotationKind.marker &&
+                                isTreatmentMarker(item.markerType))
+                            .length +
+                        shapes
+                            .where((shape) =>
+                                shape.preset ==
+                                GraphDrawingPreset.treatmentArea)
+                            .length,
                     photoCount: annotations
                         .where((item) => item.kind == GraphAnnotationKind.photo)
                         .length,
@@ -6258,7 +6699,13 @@ class _PropertiesSidebar extends StatelessWidget {
   _GraphLayer _layerForAnnotation(GraphAnnotation annotation) {
     return annotation.kind == GraphAnnotationKind.photo
         ? _GraphLayer.photos
-        : _GraphLayer.findings;
+        : annotation.kind == GraphAnnotationKind.marker &&
+                isTreatmentMarker(annotation.markerType)
+            ? _GraphLayer.treatment
+            : annotation.kind == GraphAnnotationKind.marker &&
+                    utilityMarkerTypes.contains(annotation.markerType)
+                ? _GraphLayer.structure
+                : _GraphLayer.inspections;
   }
 
   double _shapeLinearFeet(GraphShape shape) {
@@ -6447,7 +6894,8 @@ class _LayersPanel extends StatelessWidget {
   const _LayersPanel({
     required this.wallCount,
     required this.shapeCount,
-    required this.itemCount,
+    required this.inspectionCount,
+    required this.treatmentCount,
     required this.photoCount,
     required this.layerSettings,
     required this.traceLayerVisible,
@@ -6458,7 +6906,8 @@ class _LayersPanel extends StatelessWidget {
 
   final int wallCount;
   final int shapeCount;
-  final int itemCount;
+  final int inspectionCount;
+  final int treatmentCount;
   final int photoCount;
   final Map<_GraphLayer, _LayerSettings> layerSettings;
   final bool traceLayerVisible;
@@ -6496,33 +6945,35 @@ class _LayersPanel extends StatelessWidget {
               children: [
                 _LayerRow(
                   icon: Icons.foundation_outlined,
-                  name: 'Structure',
-                  detail: '$wallCount lines',
-                  visible: _isVisible(_GraphLayer.structure),
-                  locked: _isLocked(_GraphLayer.structure),
+                  name: 'Building Structure',
+                  detail: '$wallCount lines • $shapeCount shapes',
+                  visible: _isVisible(_GraphLayer.structure) &&
+                      _isVisible(_GraphLayer.shapes),
+                  locked: _isLocked(_GraphLayer.structure) ||
+                      _isLocked(_GraphLayer.shapes),
                   onToggleVisibility: () =>
                       onToggleVisibility(_GraphLayer.structure),
                   onToggleLock: () => onToggleLock(_GraphLayer.structure),
                 ),
                 _LayerRow(
-                  icon: Icons.category_outlined,
-                  name: 'Shapes',
-                  detail: '$shapeCount overlays',
-                  visible: _isVisible(_GraphLayer.shapes),
-                  locked: _isLocked(_GraphLayer.shapes),
+                  icon: Icons.place_outlined,
+                  name: 'Inspections',
+                  detail: '$inspectionCount markers',
+                  visible: _isVisible(_GraphLayer.inspections),
+                  locked: _isLocked(_GraphLayer.inspections),
                   onToggleVisibility: () =>
-                      onToggleVisibility(_GraphLayer.shapes),
-                  onToggleLock: () => onToggleLock(_GraphLayer.shapes),
+                      onToggleVisibility(_GraphLayer.inspections),
+                  onToggleLock: () => onToggleLock(_GraphLayer.inspections),
                 ),
                 _LayerRow(
-                  icon: Icons.place_outlined,
-                  name: 'Findings',
-                  detail: '$itemCount items',
-                  visible: _isVisible(_GraphLayer.findings),
-                  locked: _isLocked(_GraphLayer.findings),
+                  icon: Icons.medical_services_outlined,
+                  name: 'Treatment',
+                  detail: '$treatmentCount markers',
+                  visible: _isVisible(_GraphLayer.treatment),
+                  locked: _isLocked(_GraphLayer.treatment),
                   onToggleVisibility: () =>
-                      onToggleVisibility(_GraphLayer.findings),
-                  onToggleLock: () => onToggleLock(_GraphLayer.findings),
+                      onToggleVisibility(_GraphLayer.treatment),
+                  onToggleLock: () => onToggleLock(_GraphLayer.treatment),
                 ),
                 _LayerRow(
                   icon: Icons.photo_camera_outlined,
@@ -6665,7 +7116,8 @@ class _CanvasSurface extends StatelessWidget {
     required this.previewSegment,
     required this.structureVisible,
     required this.shapesVisible,
-    required this.findingsVisible,
+    required this.inspectionsVisible,
+    required this.treatmentVisible,
     required this.photosVisible,
     required this.traceLayerVisible,
   });
@@ -6692,7 +7144,8 @@ class _CanvasSurface extends StatelessWidget {
   final WallSegment? previewSegment;
   final bool structureVisible;
   final bool shapesVisible;
-  final bool findingsVisible;
+  final bool inspectionsVisible;
+  final bool treatmentVisible;
   final bool photosVisible;
   final bool traceLayerVisible;
 
@@ -6723,7 +7176,8 @@ class _CanvasSurface extends StatelessWidget {
         previewSegment: previewSegment,
         structureVisible: structureVisible,
         shapesVisible: shapesVisible,
-        findingsVisible: findingsVisible,
+        inspectionsVisible: inspectionsVisible,
+        treatmentVisible: treatmentVisible,
         photosVisible: photosVisible,
       ),
       child: SizedBox(
@@ -6757,7 +7211,8 @@ class _GraphOverlayPainter extends CustomPainter {
     required this.previewSegment,
     required this.structureVisible,
     required this.shapesVisible,
-    required this.findingsVisible,
+    required this.inspectionsVisible,
+    required this.treatmentVisible,
     required this.photosVisible,
   });
 
@@ -6781,7 +7236,8 @@ class _GraphOverlayPainter extends CustomPainter {
   final WallSegment? previewSegment;
   final bool structureVisible;
   final bool shapesVisible;
-  final bool findingsVisible;
+  final bool inspectionsVisible;
+  final bool treatmentVisible;
   final bool photosVisible;
 
   @override
@@ -6792,6 +7248,8 @@ class _GraphOverlayPainter extends CustomPainter {
         segments: wallSegments,
         selectedShapeIndex: selectedShapeIndex,
         hoveredShapeIndex: hoveredShapeIndex,
+        structureVisible: shapesVisible,
+        treatmentVisible: treatmentVisible,
       ).paint(
         canvas,
         size,
@@ -6826,7 +7284,9 @@ class _GraphOverlayPainter extends CustomPainter {
       annotations: annotations,
       selectedAnnotationIndex: selectedAnnotationIndex,
       hoveredAnnotationIndex: hoveredAnnotationIndex,
-      findingsVisible: findingsVisible,
+      inspectionsVisible: inspectionsVisible,
+      treatmentVisible: treatmentVisible,
+      structureVisible: structureVisible,
       photosVisible: photosVisible,
     ).paint(canvas, size);
   }
@@ -6853,7 +7313,8 @@ class _GraphOverlayPainter extends CustomPainter {
         oldDelegate.previewSegment != previewSegment ||
         oldDelegate.structureVisible != structureVisible ||
         oldDelegate.shapesVisible != shapesVisible ||
-        oldDelegate.findingsVisible != findingsVisible ||
+        oldDelegate.inspectionsVisible != inspectionsVisible ||
+        oldDelegate.treatmentVisible != treatmentVisible ||
         oldDelegate.photosVisible != photosVisible;
   }
 }
@@ -6936,7 +7397,8 @@ class _ClipboardItem {
 enum _GraphLayer {
   structure,
   shapes,
-  findings,
+  inspections,
+  treatment,
   photos,
   trace,
 }
@@ -7174,6 +7636,8 @@ class _UndoEntry {
 }
 
 enum _SidePanelMode { properties, layers }
+
+enum _PhotoSource { files, camera }
 
 enum _EditorFileAction { save, export, upload }
 

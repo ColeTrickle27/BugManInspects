@@ -25,6 +25,7 @@ void main() {
 
     expect(document.isDirty, isFalse);
     expect(document.revision, 0);
+    expect(document.id, job.id);
     expect(document.createdAt, job.createdDate);
     expect(document.customer.pestPacLocationNumber, 'LOC-100');
     expect(document.customer.pestPacBillToNumber, 'BILL-200');
@@ -131,7 +132,7 @@ void main() {
       restored.measurementCalibration.status,
       MeasurementAccuracyStatus.verified,
     );
-    expect(restored.toJson()['schemaVersion'], 3);
+    expect(restored.toJson()['schemaVersion'], 4);
     expect(restored.isDirty, isFalse);
   });
 

@@ -10,6 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   pdf: ^3.13.0
+  idb_shim: ^2.6.7
+  image: ^4.2.0
 
 dev_dependencies:
   flutter_test:

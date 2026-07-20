@@ -2,6 +2,7 @@ import 'package:bugman_graphs/editor/editor_interaction_controller.dart';
 import 'package:bugman_graphs/models/graph_annotation.dart';
 import 'package:bugman_graphs/models/graph_point.dart';
 import 'package:bugman_graphs/models/graph_shape.dart';
+import 'package:bugman_graphs/models/graph_marker_catalog.dart';
 import 'package:bugman_graphs/models/wall_segment.dart';
 import 'package:bugman_graphs/widgets/wall_segments_painter.dart';
 import 'package:bugman_graphs/widgets/canvas_toolbar.dart';
@@ -58,7 +59,6 @@ void main() {
       GraphMarkerType.crawlspaceIssue,
       GraphMarkerType.woodDecay,
       GraphMarkerType.entryPoint,
-      GraphMarkerType.termiteActivity,
       GraphMarkerType.termiteDamage,
       GraphMarkerType.activeTermites,
       GraphMarkerType.oldTermiteActivity,
@@ -88,6 +88,16 @@ void main() {
     expect(availableInspectionMarkers, isNot(containsAll(removed)));
     expect(availableInspectionMarkers.where(removed.contains), isEmpty);
     expect(availableInspectionMarkers, contains(GraphMarkerType.woodFungi));
+    expect(availableInspectionMarkers.first, GraphMarkerType.moisture);
+    expect(availableInspectionMarkers[1], GraphMarkerType.termiteActivity);
+    expect(
+      availableInspectionMarkers,
+      isNot(contains(GraphMarkerType.moistureReading)),
+    );
+    expect(
+      availableInspectionMarkers,
+      isNot(contains(GraphMarkerType.generalPestActivity)),
+    );
     expect(availableInspectionMarkers, contains(GraphMarkerType.rot));
     expect(GraphMarkerType.rot.label, 'Wood Rot');
     expect(GraphMarkerType.woodFungi.label, 'Wood Destroying Fungi');
@@ -247,5 +257,12 @@ void main() {
     }
     expect(iconForGraphMarker(GraphMarkerType.rodentBox),
         isNot(iconForGraphMarker(GraphMarkerType.rodentTrap)));
+  });
+
+  test('moisture readings use the approved threshold colors', () {
+    expect(moistureMarkerColor(9).toARGB32(), 0xFFE0AD19);
+    expect(moistureMarkerColor(10).toARGB32(), 0xFF2E7D55);
+    expect(moistureMarkerColor(19).toARGB32(), 0xFFE0AD19);
+    expect(moistureMarkerColor(20).toARGB32(), 0xFFCC2000);
   });
 }

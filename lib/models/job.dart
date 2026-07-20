@@ -1,5 +1,6 @@
 class Job {
   Job({
+    String? id,
     required this.customerName,
     required this.serviceAddress,
     required this.pestPacLocationNumber,
@@ -7,8 +8,9 @@ class Job {
     required this.serviceType,
     required this.createdBy,
     required this.createdDate,
-  });
+  }) : id = id ?? 'job-${DateTime.now().microsecondsSinceEpoch}';
 
+  final String id;
   final String customerName;
   final String serviceAddress;
   final String pestPacLocationNumber;

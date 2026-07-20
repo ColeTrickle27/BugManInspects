@@ -1,15 +1,21 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:bugman_graphs/main.dart';
+import 'package:bugman_graphs/editor/editor_interaction_controller.dart';
 import 'package:bugman_graphs/models/graph_shape.dart';
+import 'package:bugman_graphs/models/graph_document.dart';
 import 'package:bugman_graphs/models/job.dart';
 import 'package:bugman_graphs/screens/graph_canvas_screen.dart';
+import 'package:bugman_graphs/screens/home_screen.dart';
 import 'package:bugman_graphs/screens/new_job_screen.dart';
+import 'package:bugman_graphs/services/graph_photo_service.dart';
+import 'package:bugman_graphs/services/graph_repository_stub.dart';
 import 'package:bugman_graphs/theme/app_theme.dart';
 import 'package:bugman_graphs/widgets/canvas_toolbar.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as image_lib;
 
 void main() {
   testWidgets('BugMan Graphs starts on the job list', (tester) async {
@@ -131,6 +137,69 @@ void main() {
     expect(find.text('Bill-To # BILL-84'), findsOneWidget);
   });
 
+  testWidgets('saved graph cards reopen their stored document', (tester) async {
+    final repository = MemoryGraphRepository();
+    final job = Job(
+      customerName: 'Stored Graph',
+      serviceAddress: '10 Archive Lane',
+      pestPacLocationNumber: '100',
+      pestPacBillToNumber: '200',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 7, 20),
+    );
+    await repository.saveGraph(GraphDocument.forJob(job));
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Stored Graph'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(GraphCanvasScreen), findsOneWidget);
+    expect(find.text('Stored Graph'), findsOneWidget);
+  });
+
+  testWidgets('saved and unsaved jobs with matching metadata keep separate IDs',
+      (tester) async {
+    final repository = MemoryGraphRepository();
+    final createdDate = DateTime(2026, 7, 20);
+    final savedJob = Job(
+      id: 'saved-job',
+      customerName: '',
+      serviceAddress: '',
+      pestPacLocationNumber: '',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: '',
+      createdDate: createdDate,
+    );
+    final unsavedJob = Job(
+      id: 'unsaved-job',
+      customerName: '',
+      serviceAddress: '',
+      pestPacLocationNumber: '',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: '',
+      createdDate: createdDate,
+    );
+    await repository.saveGraph(GraphDocument.forJob(savedJob));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          jobs: [savedJob, unsavedJob],
+          repository: repository,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Untitled Job'), findsNWidgets(2));
+  });
+
   testWidgets('structure plotting requires points and Enter completes it',
       (tester) async {
     tester.view.devicePixelRatio = 1;
@@ -168,6 +237,56 @@ void main() {
     await tester.pump();
 
     expect(_shapeCount(tester), 0);
+  });
+
+  testWidgets('Undo removes only the latest unfinished structure point',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    await _selectStructure(tester, 'Detached Structure');
+
+    await tester.tapAt(const Offset(280, 240));
+    await tester.tapAt(const Offset(520, 240));
+    await tester.tapAt(const Offset(520, 440));
+    await tester.pump();
+    expect(_wallCount(tester), 2);
+
+    await tester.tap(find.byTooltip('Undo'));
+    await tester.pump();
+    expect(_wallCount(tester), 1);
+    expect(_shapeCount(tester), 0);
+  });
+
+  testWidgets('dragging a completed structure vertex moves adjacent corners',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    await _selectStructure(tester, 'Detached Structure');
+
+    await tester.tapAt(const Offset(280, 240));
+    await tester.tapAt(const Offset(520, 240));
+    await tester.tapAt(const Offset(520, 440));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Select (V)'));
+    await tester.pump();
+
+    final before = List.of(_graphOverlayPainter(tester).wallSegments as List);
+    final gesture = await tester.startGesture(const Offset(280, 240));
+    await gesture.moveTo(const Offset(320, 280));
+    await gesture.up();
+    await tester.pump();
+    final after = List.of(_graphOverlayPainter(tester).wallSegments as List);
+
+    expect(after.first.start, isNot(before.first.start));
+    expect(after.last.end.x, after.first.start.x);
+    expect(after.last.end.y, after.first.start.y);
+    expect(after.first.end.x, before.first.end.x);
+    expect(after.first.end.y, before.first.end.y);
   });
 
   testWidgets('double-click completes an in-progress structure',
@@ -314,6 +433,11 @@ void main() {
     await tester.tap(find.byTooltip('Layers panel'));
     await tester.pump();
     expect(find.text('Layers'), findsWidgets);
+    expect(find.text('Building Structure'), findsOneWidget);
+    expect(find.text('Inspections'), findsOneWidget);
+    expect(find.text('Treatment'), findsOneWidget);
+    expect(find.text('Findings'), findsNothing);
+    expect(find.text('Shapes'), findsNothing);
     expect(tester.getSize(find.byType(InteractiveViewer)).width, viewerWidth);
 
     await tester.tap(find.byTooltip('Properties panel'));
@@ -378,7 +502,7 @@ void main() {
       tester.getCenter(quickMeasure),
       kind: PointerDeviceKind.mouse,
     );
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 400));
     await gesture.moveTo(tester.getCenter(quickToolbar));
     await tester.pump();
     await gesture.up();
@@ -427,6 +551,74 @@ void main() {
     await tester.tapAt(const Offset(410, 335));
     await tester.pump();
     expect(find.text('Item Properties'), findsOneWidget);
+  });
+
+  testWidgets('photo tool adds multiple selected images to one pin',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final job = Job(
+      customerName: 'Photo Test',
+      serviceAddress: '',
+      pestPacLocationNumber: '',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 7, 20),
+    );
+    final png = Uint8List.fromList(
+      image_lib.encodePng(image_lib.Image(width: 8, height: 8)),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GraphCanvasScreen(
+          job: job,
+          photoPicker: _FakePhotoPicker([
+            PickedGraphPhoto(name: 'one.png', bytes: png),
+            PickedGraphPhoto(name: 'two.png', bytes: png),
+          ]),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final photoTool = find.byTooltip(
+      'Photo\nHold and drag to customize quick tools',
+    );
+    await tester.ensureVisible(photoTool);
+    // The toolbar is independently scrollable; settle after bringing the
+    // photo action into its viewport before tapping it.
+    await tester.pumpAndSettle();
+    expect(photoTool.hitTestable(), findsOneWidget);
+    await tester.tap(photoTool.hitTestable());
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(
+      tester.widget<CanvasToolbar>(find.byType(CanvasToolbar)).selectedTool,
+      CanvasTool.photo,
+    );
+    await tester.tapAt(const Offset(500, 350));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose Photos or Files'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add 2 photos?'), findsOneWidget);
+    await tester.tap(find.text('Add to Graph'));
+    await tester.pumpAndSettle();
+
+    final annotations =
+        _graphOverlayPainter(tester).annotations as List<dynamic>;
+    expect(annotations, hasLength(1));
+    expect(annotations.single.attachmentIds, hasLength(2));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.pump();
+    await tester.tapAt(const Offset(500, 350));
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tapAt(const Offset(500, 350));
+    await tester.pumpAndSettle();
+    expect(find.text('2 photo attachments'), findsOneWidget);
+    expect(find.text('one.png'), findsOneWidget);
+    expect(find.text('two.png'), findsOneWidget);
   });
 
   testWidgets('selected shape rotation handle rotates the finished shape',
@@ -801,4 +993,17 @@ Future<void> _selectLineTool(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
   await tester.tap(find.text(label));
   await tester.pumpAndSettle();
+}
+
+class _FakePhotoPicker implements GraphPhotoPicker {
+  _FakePhotoPicker(this.photos);
+
+  final List<PickedGraphPhoto> photos;
+
+  @override
+  Future<PickedGraphPhoto?> capture() async =>
+      photos.isEmpty ? null : photos.first;
+
+  @override
+  Future<List<PickedGraphPhoto>> chooseMultiple() async => photos;
 }

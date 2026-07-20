@@ -4,6 +4,8 @@ import 'models/job.dart';
 import 'screens/graph_canvas_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/new_job_screen.dart';
+import 'services/graph_repository.dart';
+import 'services/graph_repository_factory.dart';
 import 'theme/app_theme.dart';
 
 void main() {
@@ -18,12 +20,11 @@ class BugManGraphsApp extends StatefulWidget {
 }
 
 class _BugManGraphsAppState extends State<BugManGraphsApp> {
+  late final GraphRepository _repository = createGraphRepository();
   final List<Job> _jobs = <Job>[];
 
   void _addJob(Job job) {
-    setState(() {
-      _jobs.insert(0, job);
-    });
+    setState(() => _jobs.insert(0, job));
   }
 
   @override
@@ -33,7 +34,7 @@ class _BugManGraphsAppState extends State<BugManGraphsApp> {
       debugShowCheckedModeBanner: false,
       theme: buildBugManTheme(),
       routes: {
-        '/': (context) => HomeScreen(jobs: _jobs),
+        '/': (context) => HomeScreen(jobs: _jobs, repository: _repository),
         NewJobScreen.routeName: (context) => NewJobScreen(onCreateJob: _addJob),
       },
       onGenerateRoute: (settings) {
@@ -41,7 +42,10 @@ class _BugManGraphsAppState extends State<BugManGraphsApp> {
           final job = settings.arguments as Job;
 
           return MaterialPageRoute<void>(
-            builder: (context) => GraphCanvasScreen(job: job),
+            builder: (context) => GraphCanvasScreen(
+              job: job,
+              repository: _repository,
+            ),
           );
         }
 

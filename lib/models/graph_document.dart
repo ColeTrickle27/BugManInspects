@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -16,6 +17,7 @@ import 'trace_geometry.dart';
 /// in the editor. Everything that belongs in a saved inspection lives here.
 class GraphDocument extends ChangeNotifier {
   GraphDocument({
+    String? id,
     required this.customer,
     List<WallSegment> wallSegments = const <WallSegment>[],
     List<GraphAnnotation> annotations = const <GraphAnnotation>[],
@@ -29,7 +31,8 @@ class GraphDocument extends ChangeNotifier {
     Map<String, Object?> extraProperties = const <String, Object?>{},
     DateTime? createdAt,
     DateTime? updatedAt,
-  })  : _wallSegments = List<WallSegment>.of(wallSegments),
+  })  : id = id ?? newGraphId(),
+        _wallSegments = List<WallSegment>.of(wallSegments),
         _annotations = List<GraphAnnotation>.of(annotations),
         _shapes = List<GraphShape>.of(shapes),
         _freehandStrokes = List<FreehandStroke>.of(freehandStrokes),
@@ -48,6 +51,7 @@ class GraphDocument extends ChangeNotifier {
 
   factory GraphDocument.forJob(Job job) {
     return GraphDocument(
+      id: job.id,
       customer: GraphCustomerInfo.fromJob(job),
       createdAt: job.createdDate,
     );
@@ -61,6 +65,7 @@ class GraphDocument extends ChangeNotifier {
     final objectSource = graphObjects.isEmpty ? json : graphObjects;
 
     return GraphDocument(
+      id: _string(json['id']).isEmpty ? null : _string(json['id']),
       customer: GraphCustomerInfo.fromJson(
         customerJson.isNotEmpty ? customerJson : job,
       ),
@@ -76,7 +81,7 @@ class GraphDocument extends ChangeNotifier {
       freehandStrokes: _list(objectSource['freehandStrokes'])
           .map((value) => _freehandFromJson(_map(value)))
           .toList(),
-      layers: _map(json['layers']).map(
+      layers: _migrateLayers(_map(json['layers'])).map(
         (key, value) => MapEntry(
           key,
           GraphLayerState.fromJson(_map(value)),
@@ -96,6 +101,7 @@ class GraphDocument extends ChangeNotifier {
       metadata: _map(json['metadata']),
       extraProperties: _unknownFields(json, const {
         'schemaVersion',
+        'id',
         'customer',
         'job',
         'graphObjects',
@@ -116,16 +122,18 @@ class GraphDocument extends ChangeNotifier {
     )..markClean();
   }
 
-  static const int schemaVersion = 3;
+  static const int schemaVersion = 4;
 
   static const Map<String, GraphLayerState> defaultLayers = {
     'structure': GraphLayerState(),
     'shapes': GraphLayerState(),
-    'findings': GraphLayerState(),
+    'inspections': GraphLayerState(),
+    'treatment': GraphLayerState(),
     'photos': GraphLayerState(),
     'trace': GraphLayerState(visible: false),
   };
 
+  final String id;
   GraphCustomerInfo customer;
   final DateTime createdAt;
   DateTime updatedAt;
@@ -231,6 +239,7 @@ class GraphDocument extends ChangeNotifier {
 
   Map<String, Object?> toJson() => {
         ..._extraProperties,
+        'id': id,
         'schemaVersion': schemaVersion,
         'customer': customer.toJson(),
         'graphObjects': {
@@ -331,20 +340,81 @@ class GraphLayerState {
 }
 
 class GraphAttachment {
-  const GraphAttachment({required this.id, required this.name, this.uri});
+  const GraphAttachment({
+    required this.id,
+    required this.name,
+    this.annotationId = '',
+    this.mimeType = '',
+    this.byteSize = 0,
+    this.width = 0,
+    this.height = 0,
+    this.blobKey = '',
+    this.thumbnailKey = '',
+    this.uri,
+  });
 
   factory GraphAttachment.fromJson(Map<String, Object?> json) =>
       GraphAttachment(
         id: _string(json['id']),
         name: _string(json['name']),
+        annotationId: _string(json['annotationId']),
+        mimeType: _string(json['mimeType']),
+        byteSize: (json['byteSize'] as num?)?.toInt() ?? 0,
+        width: (json['width'] as num?)?.toInt() ?? 0,
+        height: (json['height'] as num?)?.toInt() ?? 0,
+        blobKey: _string(json['blobKey']).isEmpty
+            ? _string(json['id'])
+            : _string(json['blobKey']),
+        thumbnailKey: _string(json['thumbnailKey']).isEmpty
+            ? '${_string(json['id'])}-thumb'
+            : _string(json['thumbnailKey']),
         uri: json['uri'] as String?,
       );
 
   final String id;
   final String name;
+  final String annotationId;
+  final String mimeType;
+  final int byteSize;
+  final int width;
+  final int height;
+  final String blobKey;
+  final String thumbnailKey;
   final String? uri;
 
-  Map<String, Object?> toJson() => {'id': id, 'name': name, 'uri': uri};
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'name': name,
+        'annotationId': annotationId,
+        'mimeType': mimeType,
+        'byteSize': byteSize,
+        'width': width,
+        'height': height,
+        'blobKey': blobKey,
+        'thumbnailKey': thumbnailKey,
+        'uri': uri,
+      };
+}
+
+String newGraphId() {
+  final random = math.Random.secure();
+  final suffix = List.generate(
+    12,
+    (_) => random.nextInt(16).toRadixString(16),
+  ).join();
+  return '${DateTime.now().microsecondsSinceEpoch}-$suffix';
+}
+
+Map<String, Object?> _migrateLayers(Map<String, Object?> layers) {
+  if (!layers.containsKey('findings')) {
+    return layers;
+  }
+  final legacyFindings = layers['findings'];
+  return <String, Object?>{
+    ...layers,
+    'inspections': layers['inspections'] ?? legacyFindings,
+    'treatment': layers['treatment'] ?? legacyFindings,
+  };
 }
 
 Map<String, Object?> _map(Object? value) {
@@ -408,6 +478,7 @@ WallSegment _wallSegmentFromJson(Map<String, Object?> json) => WallSegment(
 
 Map<String, Object?> _annotationToJson(GraphAnnotation item) => {
       ...item.extraProperties,
+      'id': item.id,
       'kind': item.kind.name,
       'point': _pointToJson(item.point),
       'label': item.label,
@@ -422,9 +493,11 @@ Map<String, Object?> _annotationToJson(GraphAnnotation item) => {
       'textColor': _color(item.textColor),
       'backgroundColor': _color(item.backgroundColor),
       'borderColor': _color(item.borderColor),
+      'attachmentIds': item.attachmentIds,
     };
 GraphAnnotation _annotationFromJson(Map<String, Object?> json) =>
     GraphAnnotation(
+      id: _string(json['id']).isEmpty ? newGraphId() : _string(json['id']),
       kind: _enum(
         GraphAnnotationKind.values,
         json['kind'],
@@ -450,6 +523,9 @@ GraphAnnotation _annotationFromJson(Map<String, Object?> json) =>
       backgroundColor:
           _readColor(json['backgroundColor'], const Color(0xFFFFF2B8)),
       borderColor: _readColor(json['borderColor'], const Color(0xFFC7A93C)),
+      attachmentIds: _list(json['attachmentIds'])
+          .map((value) => value.toString())
+          .toList(),
       extraProperties: _unknownFields(json, const {
         'kind',
         'point',
@@ -465,6 +541,8 @@ GraphAnnotation _annotationFromJson(Map<String, Object?> json) =>
         'textColor',
         'backgroundColor',
         'borderColor',
+        'id',
+        'attachmentIds',
       }),
     );
 

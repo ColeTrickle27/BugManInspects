@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../editor/editor_interaction_controller.dart';
 import '../models/graph_annotation.dart';
+import '../models/graph_marker_catalog.dart';
 import '../models/graph_shape.dart';
 import 'graph_marker_visual.dart';
 
@@ -124,37 +125,11 @@ const utilityToolbarActions = <CanvasToolbarAction>[
   CanvasToolbarAction.marker(GraphMarkerType.waterLine),
 ];
 
-const _utilityMarkers = <GraphMarkerType>{
-  GraphMarkerType.hvacUnit,
-  GraphMarkerType.pier,
-  GraphMarkerType.steps,
-  GraphMarkerType.crawlspaceAccess,
-  GraphMarkerType.gasLine,
-  GraphMarkerType.waterLine,
-};
-
-final _inspectionMarkers = GraphMarkerType.values
-    .where((marker) =>
-        marker.availableForNewPlacement &&
-        marker.category != GraphMarkerCategory.treatment &&
-        marker.category != GraphMarkerCategory.review &&
-        !_utilityMarkers.contains(marker))
-    .toList(growable: false);
-
-final _treatmentMarkers = <GraphMarkerType>[
-  GraphMarkerType.treatmentArea,
-  ...GraphMarkerType.values.where((marker) =>
-      marker.availableForNewPlacement &&
-      marker.category == GraphMarkerCategory.treatment &&
-      marker != GraphMarkerType.treatmentArea),
-  GraphMarkerType.treatmentNote,
-];
+@visibleForTesting
+List<GraphMarkerType> get availableInspectionMarkers => inspectionMarkerTypes;
 
 @visibleForTesting
-List<GraphMarkerType> get availableInspectionMarkers => _inspectionMarkers;
-
-@visibleForTesting
-List<GraphMarkerType> get availableTreatmentMarkers => _treatmentMarkers;
+List<GraphMarkerType> get availableTreatmentMarkers => treatmentMarkerTypes;
 
 @visibleForTesting
 List<GraphDrawingPreset> get structureToolbarPresets => [
@@ -334,11 +309,28 @@ class CanvasToolbar extends StatelessWidget {
               ],
               const Divider(height: 22),
               const _ToolbarGroupLabel(label: 'Inspection Markers'),
+              for (final marker in const [
+                GraphMarkerType.moisture,
+                GraphMarkerType.termiteActivity,
+              ]) ...[
+                _ActionButton(
+                  action: CanvasToolbarAction.marker(marker),
+                  selectedTool: selectedTool,
+                  selectedPreset: selectedDrawingPreset,
+                  selectedMarker: selectedMarkerType,
+                  onPressed: _activate,
+                  onDoubleTap: () => onActionDoubleTapped(
+                    CanvasToolbarAction.marker(marker),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               _MarkerPickerButton(
-                tooltipLabel: 'Inspection Marker',
+                tooltipLabel: 'More Inspection Markers',
                 selectedMarker: selectedMarkerType,
-                active: selectedTool == CanvasTool.marker,
-                markers: _inspectionMarkers,
+                active: selectedTool == CanvasTool.marker &&
+                    inspectionMarkerTypes.skip(2).contains(selectedMarkerType),
+                markers: inspectionMarkerTypes.skip(2).toList(),
                 onSelected: onMarkerSelected,
               ),
               const SizedBox(height: 8),
@@ -348,8 +340,8 @@ class CanvasToolbar extends StatelessWidget {
                 tooltipLabel: 'Treatment Marker',
                 selectedMarker: selectedMarkerType,
                 active: selectedTool == CanvasTool.marker &&
-                    _treatmentMarkers.contains(selectedMarkerType),
-                markers: _treatmentMarkers,
+                    treatmentMarkerTypes.contains(selectedMarkerType),
+                markers: treatmentMarkerTypes,
                 onSelected: onMarkerSelected,
               ),
               const SizedBox(height: 8),
@@ -605,8 +597,10 @@ class _DraggableAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Draggable<CanvasToolbarAction>(
+    return LongPressDraggable<CanvasToolbarAction>(
       data: action,
+      delay: const Duration(milliseconds: 350),
+      maxSimultaneousDrags: 1,
       feedback: Material(
         color: Colors.transparent,
         child: _DragFeedback(action: action),

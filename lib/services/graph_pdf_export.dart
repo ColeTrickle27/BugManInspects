@@ -4,6 +4,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/trace_geometry.dart';
+import 'graph_export_legend.dart';
 
 class GraphPdfExport {
   const GraphPdfExport._();
@@ -12,6 +13,7 @@ class GraphPdfExport {
     required Uint8List graphPng,
     required String title,
     required MeasurementCalibration calibration,
+    List<GraphLegendSection> legend = const [],
   }) async {
     final document = pw.Document(
       title: title,
@@ -53,6 +55,49 @@ class GraphPdfExport {
                 child: pw.Image(image, fit: pw.BoxFit.contain),
               ),
             ),
+            if (legend.isNotEmpty) ...[
+              pw.SizedBox(height: 10),
+              for (final section in legend) ...[
+                pw.Text(
+                  section.title,
+                  style: const pw.TextStyle(
+                    fontSize: 11,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 3),
+                pw.Wrap(
+                  spacing: 12,
+                  runSpacing: 4,
+                  children: [
+                    for (final entry in section.entries)
+                      pw.SizedBox(
+                        width: 155,
+                        child: pw.Row(
+                          children: [
+                            pw.Container(
+                              width: 9,
+                              height: 9,
+                              decoration: pw.BoxDecoration(
+                                color: PdfColor.fromInt(entry.color.toARGB32()),
+                                shape: pw.BoxShape.circle,
+                              ),
+                            ),
+                            pw.SizedBox(width: 5),
+                            pw.Expanded(
+                              child: pw.Text(
+                                '${entry.markerType.shortLabel}  ${entry.markerType.label}',
+                                style: const pw.TextStyle(fontSize: 8),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+                pw.SizedBox(height: 6),
+              ],
+            ],
           ],
         ),
       ),

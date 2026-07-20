@@ -64,17 +64,26 @@ class GraphShapesPainter extends CustomPainter {
     required this.segments,
     required this.selectedShapeIndex,
     this.hoveredShapeIndex,
+    this.structureVisible = true,
+    this.treatmentVisible = true,
   });
 
   final List<GraphShape> shapes;
   final List<WallSegment> segments;
   final int? selectedShapeIndex;
   final int? hoveredShapeIndex;
+  final bool structureVisible;
+  final bool treatmentVisible;
 
   @override
   void paint(Canvas canvas, Size size) {
     for (var i = 0; i < shapes.length; i += 1) {
       final shape = shapes[i];
+      final isTreatment = shape.preset == GraphDrawingPreset.treatmentArea;
+      if ((isTreatment && !treatmentVisible) ||
+          (!isTreatment && !structureVisible)) {
+        continue;
+      }
       final shapeSegments = _segmentsForShape(shape);
       if (shapeSegments.isEmpty) {
         continue;
@@ -140,7 +149,7 @@ class GraphShapesPainter extends CustomPainter {
       }
 
       if (i == selectedShapeIndex) {
-        _drawSelectedShape(canvas, path, bounds);
+        _drawSelectedShape(canvas, shape, shapeSegments, path, bounds);
       }
     }
   }
@@ -157,7 +166,13 @@ class GraphShapesPainter extends CustomPainter {
     );
   }
 
-  void _drawSelectedShape(Canvas canvas, Path path, Rect bounds) {
+  void _drawSelectedShape(
+    Canvas canvas,
+    GraphShape shape,
+    List<WallSegment> shapeSegments,
+    Path path,
+    Rect bounds,
+  ) {
     final selectedPaint = Paint()
       ..color = const Color(0xFF2F80ED)
       ..style = PaintingStyle.stroke
@@ -165,12 +180,19 @@ class GraphShapesPainter extends CustomPainter {
 
     canvas.drawPath(path, selectedPaint);
 
-    for (final handleCenter in [
-      bounds.topLeft,
-      bounds.topRight,
-      bounds.bottomLeft,
-      bounds.bottomRight,
-    ]) {
+    final handleCenters = shape.isStructure
+        ? <Offset>{
+            for (final segment in shapeSegments) segment.start.offset,
+            for (final segment in shapeSegments) segment.end.offset,
+          }
+        : <Offset>{
+            bounds.topLeft,
+            bounds.topRight,
+            bounds.bottomLeft,
+            bounds.bottomRight,
+          };
+
+    for (final handleCenter in handleCenters) {
       final handle = Rect.fromCenter(
         center: handleCenter,
         width: 12,

@@ -1,17 +1,52 @@
 import 'package:flutter/material.dart';
 
 import '../models/job.dart';
+import '../services/graph_repository.dart';
 import '../theme/app_theme.dart';
 import 'graph_canvas_screen.dart';
 import 'new_job_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({
-    required this.jobs,
+    this.jobs = const [],
+    this.repository,
     super.key,
   });
 
   final List<Job> jobs;
+  final GraphRepository? repository;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  late Future<List<SavedGraphSummary>> _savedGraphs = _loadGraphs();
+
+  Future<List<SavedGraphSummary>> _loadGraphs() async {
+    final repository = widget.repository;
+    final saved = repository == null
+        ? <SavedGraphSummary>[]
+        : await repository.listGraphs();
+    final savedIds = saved.map((item) => item.id).toSet();
+    return [
+      ...saved,
+      for (final job in widget.jobs)
+        if (!savedIds.contains(job.id))
+          SavedGraphSummary(
+            id: job.id,
+            job: job,
+            updatedAt: job.createdDate,
+            isPersisted: false,
+          ),
+    ];
+  }
+
+  void _refresh() {
+    setState(() {
+      _savedGraphs = _loadGraphs();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,23 +64,44 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
       body: SafeArea(
-        child: jobs.isEmpty
-            ? const _EmptyJobsState()
-            : ListView.separated(
-                padding: const EdgeInsets.all(16),
-                itemCount: jobs.length,
-                separatorBuilder: (context, index) =>
-                    const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  final job = jobs[index];
-
-                  return _JobCard(job: job);
-                },
-              ),
+        child: FutureBuilder<List<SavedGraphSummary>>(
+          future: _savedGraphs,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return widget.jobs.isEmpty
+                  ? const _EmptyJobsState()
+                  : const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: TextButton.icon(
+                  onPressed: _refresh,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Saved graphs could not be loaded'),
+                ),
+              );
+            }
+            final graphs = snapshot.data ?? const <SavedGraphSummary>[];
+            if (graphs.isEmpty) return const _EmptyJobsState();
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: graphs.length,
+              separatorBuilder: (context, index) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final graph = graphs[index];
+                return _JobCard(
+                  job: graph.job,
+                  onTap: () => _openGraph(graph),
+                );
+              },
+            );
+          },
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.of(context).pushNamed(NewJobScreen.routeName);
+        onPressed: () async {
+          await Navigator.of(context).pushNamed(NewJobScreen.routeName);
+          if (mounted) _refresh();
         },
         icon: const Icon(Icons.add),
         label: const Text('New Job'),
@@ -54,6 +110,34 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _openGraph(SavedGraphSummary summary) async {
+    final repository = widget.repository;
+    if (repository == null || !summary.isPersisted) {
+      await Navigator.of(context).pushNamed(
+        GraphCanvasScreen.routeName,
+        arguments: summary.job,
+      );
+    } else {
+      final document = await repository.loadGraph(summary.id);
+      if (!mounted) return;
+      if (document == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Saved graph could not be opened')),
+        );
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => GraphCanvasScreen(
+            document: document,
+            repository: repository,
+          ),
+        ),
+      );
+    }
+    if (mounted) _refresh();
   }
 }
 
@@ -146,9 +230,10 @@ class _EmptyJobsState extends StatelessWidget {
 }
 
 class _JobCard extends StatelessWidget {
-  const _JobCard({required this.job});
+  const _JobCard({required this.job, required this.onTap});
 
   final Job job;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -179,12 +264,7 @@ class _JobCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: InkWell(
-        onTap: () {
-          Navigator.of(context).pushNamed(
-            GraphCanvasScreen.routeName,
-            arguments: job,
-          );
-        },
+        onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
