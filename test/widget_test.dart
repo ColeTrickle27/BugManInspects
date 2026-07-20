@@ -885,6 +885,33 @@ void main() {
     expect(_shapeCount(tester), 1);
   });
 
+  testWidgets('Undo lifts the latest unfinished line point like right-click',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    await _selectLineTool(tester, 'Line');
+    await tester.tapAt(const Offset(320, 260));
+    await tester.tapAt(const Offset(500, 260));
+    await tester.pump();
+    expect(_wallCount(tester), 1);
+
+    await tester.tap(find.byTooltip('Undo'));
+    await tester.pump();
+
+    expect(_wallCount(tester), 0);
+    expect(
+      find.byWidgetPredicate((widget) =>
+          widget is Tooltip &&
+          widget.message == 'Latest plotted point removed'),
+      findsOneWidget,
+    );
+    await tester.tapAt(const Offset(500, 300));
+    await tester.pump();
+    expect(_wallCount(tester), 1);
+  });
+
   testWidgets('thin line selection uses reduced but practical tolerance',
       (tester) async {
     tester.view.devicePixelRatio = 1;

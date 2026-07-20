@@ -124,6 +124,9 @@ class WallSegmentsPainter extends CustomPainter {
     final preview = previewSegment;
     if (preview != null) {
       _drawPreviewSegment(canvas, preview);
+      if (drawMeasurements) {
+        _drawMeasurementLabel(canvas, preview);
+      }
     }
   }
 

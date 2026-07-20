@@ -247,6 +247,21 @@ void main() {
     );
   });
 
+  test('active drawing preview reports footage before the point is placed', () {
+    const preview = WallSegment(
+      start: GraphPoint(x: 0, y: 0),
+      end: GraphPoint(x: 720, y: 0),
+    );
+    final painter = WallSegmentsPainter(
+      segments: const [],
+      selectedSegmentIndex: null,
+      activeWallStart: preview.start,
+      previewSegment: preview,
+    );
+
+    expect(painter.previewSegment?.measurementLabel, '30 lf');
+  });
+
   test('canvas markers use the same recognizable icon mapping as toolbar', () {
     for (final marker in {
       ...availableInspectionMarkers,

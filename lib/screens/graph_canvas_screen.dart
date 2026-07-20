@@ -366,13 +366,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     final key = event.logicalKey;
 
     if (isControlPressed && key == LogicalKeyboardKey.keyZ) {
-      if (!HardwareKeyboard.instance.isShiftPressed &&
-          _selectedTool == CanvasTool.structure &&
-          _interaction.drawingSession ==
-              EditorDrawingSession.plottingStructure) {
-        _removeLastStructurePoint();
-        return KeyEventResult.handled;
-      }
       if (HardwareKeyboard.instance.isShiftPressed) {
         _redoLastAction();
       } else {
@@ -940,6 +933,15 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _selectedTool != CanvasTool.arrow &&
         _selectedTool != CanvasTool.curve) {
       return false;
+    }
+
+    if (_pendingCurveControlPoint != null) {
+      setState(() {
+        _pendingCurveControlPoint = null;
+        _previewSegment = null;
+        _canvasStatus = 'Latest plotted point removed';
+      });
+      return true;
     }
 
     if (_wallSegments.length > startIndex) {
@@ -1554,25 +1556,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _structureStartSnapshot = null;
       _interaction.setDrawingSession(EditorDrawingSession.idle);
       _canvasStatus = 'Unfinished structure cancelled';
-    });
-  }
-
-  void _removeLastStructurePoint() {
-    final startIndex = _activePathStartSegmentIndex;
-    if (startIndex == null) {
-      return;
-    }
-    if (_wallSegments.length <= startIndex) {
-      _cancelActiveStructure();
-      return;
-    }
-
-    final removed = _wallSegments.last;
-    setState(() {
-      _wallSegments = _wallSegments.sublist(0, _wallSegments.length - 1);
-      _activeWallStart = removed.start;
-      _previewSegment = null;
-      _canvasStatus = 'Last structure point removed';
     });
   }
 
@@ -3544,18 +3527,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _undoLastAction() {
-    if (_pendingCurveControlPoint != null && _activeWallStart != null) {
-      setState(() {
-        _pendingCurveControlPoint = null;
-        _previewSegment = null;
-        _canvasStatus = 'Curve bend point removed';
-      });
-      return;
-    }
-
-    if (_selectedTool == CanvasTool.structure &&
-        _interaction.drawingSession == EditorDrawingSession.plottingStructure) {
-      _removeLastStructurePoint();
+    if (_removeLatestDraftPoint()) {
       return;
     }
 
