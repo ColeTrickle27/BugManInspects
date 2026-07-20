@@ -4,7 +4,11 @@ import 'dart:html' as html;
 import 'dart:typed_data';
 
 bool downloadGraphPng(Uint8List bytes, String filename) {
-  final blob = html.Blob(<Object>[bytes], 'image/png');
+  return downloadGraphFile(bytes, filename, 'image/png');
+}
+
+bool downloadGraphFile(Uint8List bytes, String filename, String mimeType) {
+  final blob = html.Blob(<Object>[bytes], mimeType);
   final url = html.Url.createObjectUrlFromBlob(blob);
   html.AnchorElement(href: url)
     ..download = filename

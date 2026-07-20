@@ -5,6 +5,7 @@ import 'package:bugman_graphs/models/graph_point.dart';
 import 'package:bugman_graphs/models/graph_shape.dart';
 import 'package:bugman_graphs/models/job.dart';
 import 'package:bugman_graphs/models/wall_segment.dart';
+import 'package:bugman_graphs/models/trace_geometry.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -90,6 +91,25 @@ void main() {
         ),
       ],
       metadata: const {'inspectionId': 'I-42'},
+      traces: const [
+        TraceGeometry(
+          id: 'property',
+          label: 'Property boundary',
+          geoPoints: [
+            GeoPoint(latitude: 35, longitude: -86),
+            GeoPoint(latitude: 35.001, longitude: -86),
+          ],
+          canvasPoints: [
+            GraphPoint(x: 10, y: 10),
+            GraphPoint(x: 10, y: 100),
+          ],
+          closed: false,
+        ),
+      ],
+      measurementCalibration: const MeasurementCalibration(
+        source: MeasurementSource.mapGeodesic,
+        status: MeasurementAccuracyStatus.verified,
+      ),
     );
 
     final restored = GraphDocument.fromJson(document.toJson());
@@ -105,6 +125,13 @@ void main() {
     expect(restored.shapes.single.text, 'Kitchen');
     expect(restored.freehandStrokes.single.points, hasLength(2));
     expect(restored.metadata['inspectionId'], 'I-42');
+    expect(restored.traces.single.label, 'Property boundary');
+    expect(restored.traces.single.geoPoints.first.latitude, 35);
+    expect(
+      restored.measurementCalibration.status,
+      MeasurementAccuracyStatus.verified,
+    );
+    expect(restored.toJson()['schemaVersion'], 3);
     expect(restored.isDirty, isFalse);
   });
 

@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +13,9 @@ import '../models/graph_point.dart';
 import '../models/graph_shape.dart';
 import '../models/job.dart';
 import '../models/wall_segment.dart';
+import '../services/export_bounds_calculator.dart';
+import '../services/graph_image_export.dart';
+import '../services/graph_pdf_export.dart';
 import '../widgets/canvas_toolbar.dart';
 import '../widgets/freehand_strokes_painter.dart';
 import '../widgets/graph_export_downloader.dart';
@@ -194,6 +196,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _cancelActiveStructure();
     }
     setState(() {
+      _lastTapTime = null;
+      _lastTapSceneOffset = null;
       _interaction.selectTool(tool);
       _canvasStatus = _toolStatus(tool);
       _previewSegment = null;
@@ -208,6 +212,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
     final markerDefault = _markerDefaultsFor(markerType);
     setState(() {
+      _lastTapTime = null;
+      _lastTapSceneOffset = null;
       _interaction.selectMarker(markerType);
       _selectedMarkerColor = markerDefault.color;
       _selectedMarkerSize = markerDefault.size;
@@ -223,6 +229,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _cancelActiveStructure();
     }
     setState(() {
+      _lastTapTime = null;
+      _lastTapSceneOffset = null;
       _interaction.selectStructure(preset);
       _activeWallStart = null;
       _activePathStartPoint = null;
@@ -247,10 +255,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   void _inspectToolbarAction(CanvasToolbarAction action) {
     _activateToolbarAction(action);
-    setState(() {
-      _sidePanelMode = _SidePanelMode.properties;
-      _canvasStatus = '${action.label} properties shown';
-    });
   }
 
   void _addQuickToolbarAction(CanvasToolbarAction action) {
@@ -427,7 +431,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     } else if (key == LogicalKeyboardKey.keyT) {
       _selectTool(CanvasTool.text);
     } else if (key == LogicalKeyboardKey.keyP) {
-      _selectTool(CanvasTool.photo);
+      _togglePropertiesCollapsed();
     } else {
       return KeyEventResult.ignored;
     }
@@ -552,7 +556,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _startDragForSelection(currentSelection!, pointerPoint);
         return;
       }
-      _pointerDownHitSelection = _selectionAt(pointerPoint);
+      _pointerDownHitSelection = _selectedTool == CanvasTool.select
+          ? _selectionAt(pointerPoint)
+          : null;
 
       final hitSelection = _pointerDownHitSelection;
       if (hitSelection != null) {
@@ -560,7 +566,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           _selection = hitSelection;
           _interaction.setSelected(_interactionReference(hitSelection));
           _canvasStatus = _selectionStatus(hitSelection);
-          _sidePanelMode = _SidePanelMode.properties;
         });
         if (_isSelectionEditable(hitSelection)) {
           _startDragForSelection(
@@ -638,6 +643,16 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   void _handlePointerHover(PointerHoverEvent event) {
     final sceneOffset = _transformationController.toScene(event.localPosition);
     if (_isInsideCanvas(sceneOffset)) {
+      if (_selectedTool != CanvasTool.select) {
+        if (_hoverSelection != null) {
+          setState(() {
+            _hoverSelection = null;
+            _interaction.setHovered(null);
+          });
+        }
+        _updatePreviewSegment(sceneOffset);
+        return;
+      }
       final nextHover = _selectionAt(GraphPoint.fromOffset(sceneOffset));
       if (nextHover != _hoverSelection) {
         setState(() {
@@ -674,12 +689,22 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     final sceneOffset = _transformationController.toScene(event.localPosition);
 
     if (_pointerDownHitSelection != null) {
-      if (wasSinglePointerTap &&
-          _isDoubleClickNearLastTap(sceneOffset) &&
-          _editSelectedObjectText()) {
-        _resetPointerGesture();
-        _rememberTap(sceneOffset);
-        return;
+      if (wasSinglePointerTap && _isDoubleClickNearLastTap(sceneOffset)) {
+        if (_selectionOpensPropertiesOnDoubleClick(_pointerDownHitSelection!)) {
+          setState(() {
+            _sidePanelMode = _SidePanelMode.properties;
+            _canvasStatus =
+                '${_selectionStatus(_pointerDownHitSelection!)} • Properties shown';
+          });
+          _resetPointerGesture();
+          _rememberTap(sceneOffset);
+          return;
+        }
+        if (_editSelectedObjectText()) {
+          _resetPointerGesture();
+          _rememberTap(sceneOffset);
+          return;
+        }
       }
       if (_dragMoved) {
         _finishActiveDrag();
@@ -826,6 +851,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     _editTextAnnotation(textIndex);
     return true;
+  }
+
+  bool _selectionOpensPropertiesOnDoubleClick(_Selection selection) {
+    if (selection.kind == _SelectionKind.shape ||
+        selection.kind == _SelectionKind.segment ||
+        selection.kind == _SelectionKind.freehand) {
+      return true;
+    }
+    if (selection.kind != _SelectionKind.annotation) {
+      return false;
+    }
+    return _annotations[selection.index].kind == GraphAnnotationKind.marker;
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
@@ -1185,7 +1222,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
             'Grouping will apply to multi-select in the next pass');
         return;
       case _ContextAction.properties:
-        _showCanvasMessage('Properties shown in the right panel');
+        setState(() {
+          _sidePanelMode = _SidePanelMode.properties;
+          _canvasStatus = 'Properties shown';
+        });
         return;
     }
   }
@@ -1270,7 +1310,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _wallSegments = <WallSegment>[..._wallSegments, ...newSegments];
       _shapes = <GraphShape>[..._shapes, shape];
       _selection = _Selection.shape(_shapes.length - 1);
-      _sidePanelMode = _SidePanelMode.properties;
       _undoStack.add(
         _UndoEntry(
           _UndoKind.shapeFinish,
@@ -1503,7 +1542,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     final segmentCount = _wallSegments.length - startIndex;
     final isArea = preset.kind == GraphDrawingPresetKind.area;
-    if (segmentCount < (isArea ? 2 : 1)) {
+    final closesShape = isArea || preset == GraphDrawingPreset.propertyLine;
+    if (segmentCount < (closesShape ? 2 : 1)) {
       _showCanvasMessage(
         isArea
             ? 'A structure needs at least three plotted corners'
@@ -1516,7 +1556,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       final segmentIndexes = <int>[
         for (var i = startIndex; i < _wallSegments.length; i += 1) i,
       ];
-      if (isArea && pathEnd.distanceTo(pathStart) > _minimumWallLength) {
+      if (closesShape && pathEnd.distanceTo(pathStart) > _minimumWallLength) {
         segmentIndexes.add(_wallSegments.length);
         _wallSegments = <WallSegment>[
           ..._wallSegments,
@@ -1539,13 +1579,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         borderColor: defaults.borderColor,
         borderWidth: defaults.borderWidth,
         pattern: isArea ? defaults.pattern : GraphShapePattern.none,
-        closed: isArea,
+        closed: closesShape,
         rotationDegrees: 0,
         preset: preset,
       );
       _shapes = <GraphShape>[..._shapes, shape];
       _selection = _Selection.shape(_shapes.length - 1);
-      _sidePanelMode = _SidePanelMode.properties;
       _interaction.setSelected(_interactionReference(_selection!));
       _undoStack.add(
         _UndoEntry(_UndoKind.snapshot, previousSnapshot: before),
@@ -1946,7 +1985,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _selection = selection;
       _interaction.setSelected(_interactionReference(selection));
       _canvasStatus = _selectionStatus(selection);
-      _sidePanelMode = _SidePanelMode.properties;
     });
     return true;
   }
@@ -3167,7 +3205,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _shapes = <GraphShape>[..._shapes, shape];
       _selection = _Selection.shape(_shapes.length - 1);
       _interaction.setSelected(_interactionReference(_selection!));
-      _sidePanelMode = _SidePanelMode.properties;
       _activeWallStart = null;
       _activePathStartPoint = null;
       _pendingCurveControlPoint = null;
@@ -4155,6 +4192,35 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   Future<void> _exportGraph() async {
+    final format = await showModalBottomSheet<_GraphExportFormat>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text('Export graph'),
+              subtitle:
+                  Text('Exports only the graph content, not empty canvas.'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf_outlined),
+              title: const Text('PDF'),
+              subtitle: const Text('Fit graph to a landscape letter page'),
+              onTap: () => Navigator.pop(context, _GraphExportFormat.pdf),
+            ),
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('PNG image'),
+              onTap: () => Navigator.pop(context, _GraphExportFormat.png),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (format == null || !mounted) return;
+
     final boundary = _canvasBoundaryKey.currentContext?.findRenderObject()
         as RenderRepaintBoundary?;
     if (boundary == null) {
@@ -4163,24 +4229,35 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     try {
-      final image = await boundary.toImage(pixelRatio: 1);
-      final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      image.dispose();
-      if (data == null) {
-        throw StateError('PNG encoding returned no data');
-      }
+      final bounds = ExportBoundsCalculator.forDocument(
+        _document,
+        canvasSize: _canvasSize,
+      );
+      final pngBytes = await GraphImageExport.capturePng(boundary, bounds);
       final safeName = _document.customer.name
           .replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '-')
           .replaceAll(RegExp(r'^-+|-+$'), '');
-      final downloaded = downloadGraphPng(
-        data.buffer.asUint8List(),
-        '${safeName.isEmpty ? 'bugman-graph' : safeName}-graph.png',
-      );
+      final baseName = safeName.isEmpty ? 'bugman-graph' : safeName;
+      final downloaded = switch (format) {
+        _GraphExportFormat.png => downloadGraphPng(
+            pngBytes,
+            '$baseName-graph.png',
+          ),
+        _GraphExportFormat.pdf => downloadGraphFile(
+            await GraphPdfExport.build(
+              graphPng: pngBytes,
+              title: _document.customer.displayName,
+              calibration: _document.measurementCalibration,
+            ),
+            '$baseName-graph.pdf',
+            'application/pdf',
+          ),
+      };
       if (!downloaded) {
-        _showCanvasMessage('PNG export is available in the web app');
+        _showCanvasMessage('Graph download is available in the web app');
         return;
       }
-      setState(() => _canvasStatus = 'Graph PNG exported');
+      setState(() => _canvasStatus = 'Graph ${format.label} exported');
     } catch (error) {
       _showCanvasMessage('Graph export failed: $error');
     }
@@ -4807,9 +4884,26 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _redoStack.clear();
   }
 
+  String? get _latestPropertyLineMeasurementSummary {
+    for (final shape in _shapes.reversed) {
+      if (shape.preset != GraphDrawingPreset.propertyLine || !shape.closed) {
+        continue;
+      }
+      final shapeSegments = <WallSegment>[
+        for (final index in shape.segmentIndexes)
+          if (index >= 0 && index < _wallSegments.length) _wallSegments[index],
+      ];
+      final summary = shapeMeasurementSummary(shape, shapeSegments);
+      if (summary.isNotEmpty) {
+        return summary;
+      }
+    }
+    return null;
+  }
+
   MouseCursor get _canvasCursor {
     final hovered = _hoverSelection;
-    if (hovered != null) {
+    if (_selectedTool == CanvasTool.select && hovered != null) {
       return _isSelectionEditable(hovered)
           ? SystemMouseCursors.move
           : SystemMouseCursors.click;
@@ -4844,6 +4938,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     const canvasLeftInset = 12.0;
     final canvasBottomInset = _quickToolbarCollapsed ? 12.0 : 82.0;
     final documentTitle = _document.customer.displayName;
+    final propertyLineSummary = _latestPropertyLineMeasurementSummary;
+    final viewportWidth = MediaQuery.sizeOf(context).width;
 
     return Scaffold(
       appBar: AppBar(
@@ -5046,6 +5142,41 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                         ),
                       ),
                     ),
+                    if (propertyLineSummary != null &&
+                        (_sidePanelMode == null || viewportWidth >= 720))
+                      Positioned(
+                        key: const ValueKey(
+                          'property-line-measurement-summary',
+                        ),
+                        top: 72,
+                        right:
+                            _sidePanelMode == null ? 24 : sidePanelWidth + 24,
+                        child: IgnorePointer(
+                          child: Card(
+                            elevation: 5,
+                            color: Colors.white,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  const Text(
+                                    'Property Line (acres)',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(propertyLineSummary),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     if (_sidePanelMode != null)
                       Positioned(
                         top: 54,
@@ -5110,6 +5241,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       ),
     );
   }
+}
+
+enum _GraphExportFormat {
+  pdf('PDF'),
+  png('PNG');
+
+  const _GraphExportFormat(this.label);
+  final String label;
 }
 
 class _TopEditorToolbar extends StatelessWidget {
@@ -5585,6 +5724,7 @@ class _PropertiesSidebar extends StatelessWidget {
           if (annotation.kind == GraphAnnotationKind.marker) ...[
             DropdownButtonFormField<GraphMarkerType>(
               initialValue: annotation.markerType,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'Marker type'),
               items: GraphMarkerType.values
                   .where((type) =>
@@ -5593,7 +5733,10 @@ class _PropertiesSidebar extends StatelessWidget {
                   .map(
                     (type) => DropdownMenuItem(
                       value: type,
-                      child: Text(type.label),
+                      child: Text(
+                        type.label,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),

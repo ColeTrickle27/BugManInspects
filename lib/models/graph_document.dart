@@ -8,6 +8,7 @@ import 'graph_point.dart';
 import 'graph_shape.dart';
 import 'job.dart';
 import 'wall_segment.dart';
+import 'trace_geometry.dart';
 
 /// The durable, serializable source of truth for one inspection graph.
 ///
@@ -22,6 +23,8 @@ class GraphDocument extends ChangeNotifier {
     List<FreehandStroke> freehandStrokes = const <FreehandStroke>[],
     Map<String, GraphLayerState>? layers,
     List<GraphAttachment> attachments = const <GraphAttachment>[],
+    List<TraceGeometry> traces = const <TraceGeometry>[],
+    MeasurementCalibration? measurementCalibration,
     Map<String, Object?> metadata = const <String, Object?>{},
     Map<String, Object?> extraProperties = const <String, Object?>{},
     DateTime? createdAt,
@@ -35,6 +38,9 @@ class GraphDocument extends ChangeNotifier {
           ...?layers,
         },
         _attachments = List<GraphAttachment>.of(attachments),
+        _traces = List<TraceGeometry>.of(traces),
+        _measurementCalibration =
+            measurementCalibration ?? MeasurementCalibration.legacy(),
         _metadata = Map<String, Object?>.of(metadata),
         _extraProperties = Map<String, Object?>.of(extraProperties),
         createdAt = createdAt ?? DateTime.now(),
@@ -79,6 +85,14 @@ class GraphDocument extends ChangeNotifier {
       attachments: _list(json['attachments'])
           .map((value) => GraphAttachment.fromJson(_map(value)))
           .toList(),
+      traces: _list(json['traces'])
+          .map((value) => TraceGeometry.fromJson(_map(value)))
+          .toList(),
+      measurementCalibration: _map(json['measurementCalibration']).isEmpty
+          ? MeasurementCalibration.legacy()
+          : MeasurementCalibration.fromJson(
+              _map(json['measurementCalibration']),
+            ),
       metadata: _map(json['metadata']),
       extraProperties: _unknownFields(json, const {
         'schemaVersion',
@@ -91,6 +105,8 @@ class GraphDocument extends ChangeNotifier {
         'freehandStrokes',
         'layers',
         'attachments',
+        'traces',
+        'measurementCalibration',
         'metadata',
         'createdAt',
         'updatedAt',
@@ -100,7 +116,7 @@ class GraphDocument extends ChangeNotifier {
     )..markClean();
   }
 
-  static const int schemaVersion = 2;
+  static const int schemaVersion = 3;
 
   static const Map<String, GraphLayerState> defaultLayers = {
     'structure': GraphLayerState(),
@@ -120,6 +136,8 @@ class GraphDocument extends ChangeNotifier {
   List<FreehandStroke> _freehandStrokes;
   Map<String, GraphLayerState> _layers;
   List<GraphAttachment> _attachments;
+  List<TraceGeometry> _traces;
+  MeasurementCalibration _measurementCalibration;
   Map<String, Object?> _metadata;
   Map<String, Object?> _extraProperties;
   bool _isDirty = false;
@@ -136,6 +154,9 @@ class GraphDocument extends ChangeNotifier {
       UnmodifiableMapView(_layers);
   UnmodifiableListView<GraphAttachment> get attachments =>
       UnmodifiableListView(_attachments);
+  UnmodifiableListView<TraceGeometry> get traces =>
+      UnmodifiableListView(_traces);
+  MeasurementCalibration get measurementCalibration => _measurementCalibration;
   UnmodifiableMapView<String, Object?> get metadata =>
       UnmodifiableMapView(_metadata);
   UnmodifiableMapView<String, Object?> get extraProperties =>
@@ -183,6 +204,16 @@ class GraphDocument extends ChangeNotifier {
     _changed();
   }
 
+  void replaceTraces(Iterable<TraceGeometry> value) {
+    _traces = List<TraceGeometry>.of(value);
+    _changed();
+  }
+
+  void setMeasurementCalibration(MeasurementCalibration value) {
+    _measurementCalibration = value;
+    _changed();
+  }
+
   void replaceMetadata(Map<String, Object?> value) {
     _metadata = Map<String, Object?>.of(value);
     _changed();
@@ -210,6 +241,8 @@ class GraphDocument extends ChangeNotifier {
         },
         'layers': _layers.map((key, value) => MapEntry(key, value.toJson())),
         'attachments': _attachments.map((item) => item.toJson()).toList(),
+        'traces': _traces.map((item) => item.toJson()).toList(),
+        'measurementCalibration': _measurementCalibration.toJson(),
         'metadata': _metadata,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),

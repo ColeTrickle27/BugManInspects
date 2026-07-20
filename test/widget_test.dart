@@ -151,7 +151,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     expect(_shapeCount(tester), 1);
-    expect(find.text('Shape Properties'), findsOneWidget);
+    expect(find.text('Shape Properties'), findsNothing);
   });
 
   testWidgets('Escape cancels an unfinished structure', (tester) async {
@@ -188,7 +188,49 @@ void main() {
     expect(_shapeCount(tester), 1);
   });
 
-  testWidgets('generic shapes require drag and support text editing',
+  testWidgets('property line closes and shows acreage summary on canvas',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    await _selectPropertyTool(tester, 'Property Line (acres)');
+    await tester.tapAt(const Offset(300, 250));
+    await tester.tapAt(const Offset(500, 250));
+    await tester.tapAt(const Offset(500, 450));
+    await tester.tap(find.text('Finish'));
+    await tester.pump();
+
+    expect(_shapeCount(tester), 1);
+    final summaryCard = find.byKey(
+      const ValueKey('property-line-measurement-summary'),
+    );
+    expect(summaryCard, findsOneWidget);
+    expect(
+      find.descendant(
+        of: summaryCard,
+        matching: find.text('Property Line (acres)'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: summaryCard,
+        matching: find.textContaining(' sf • '),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: summaryCard,
+        matching: find.textContaining(' lf'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('generic shapes require drag and double-click opens properties',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
@@ -204,12 +246,14 @@ void main() {
     await tester.dragFrom(const Offset(300, 250), const Offset(220, 170));
     await tester.pump();
     expect(_shapeCount(tester), 1);
+    expect(find.text('Shape Properties'), findsNothing);
 
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
     await tester.tapAt(const Offset(410, 335));
     await tester.pump(const Duration(milliseconds: 40));
     await tester.tapAt(const Offset(410, 335));
     await tester.pumpAndSettle();
-    expect(find.text('Edit shape text'), findsOneWidget);
+    expect(find.text('Shape Properties'), findsOneWidget);
   });
 
   testWidgets('deleting a finished shape removes its backing lines',
@@ -276,6 +320,14 @@ void main() {
     await tester.pump();
     expect(find.text('Properties'), findsWidgets);
     expect(tester.getSize(find.byType(InteractiveViewer)).width, viewerWidth);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+    await tester.pump();
+    expect(find.text('Properties'), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+    await tester.pump();
+    expect(find.text('Properties'), findsWidgets);
   });
 
   testWidgets('top toolbar keeps file and canvas options collapsed',
@@ -345,8 +397,7 @@ void main() {
     );
   });
 
-  testWidgets(
-      'existing object selection and movement override an active structure tool',
+  testWidgets('drawing tools can overlap shapes and place markers inside them',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
@@ -358,30 +409,24 @@ void main() {
     await tester.pump();
     expect(_shapeCount(tester), 1);
 
-    await _selectStructure(tester, 'Concrete Slab');
+    await _selectBasicShape(tester, 'Rectangle');
+    await tester.dragFrom(const Offset(350, 290), const Offset(110, 90));
+    await tester.pump();
+    expect(_shapeCount(tester), 2);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
     await tester.tapAt(const Offset(410, 335));
     await tester.pump();
-    expect(_shapeCount(tester), 1);
-    expect(find.text('Shape Properties'), findsOneWidget);
+    expect(_annotationCount(tester), 1);
+    expect(find.text('Item Properties'), findsNothing);
 
-    await tester.dragFrom(const Offset(410, 335), const Offset(120, 80));
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.tapAt(const Offset(410, 335));
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(find.text('Item Properties'), findsNothing);
+    await tester.tapAt(const Offset(410, 335));
     await tester.pump();
-    expect(_shapeCount(tester), 1);
-
-    await _sendShortcut(tester, LogicalKeyboardKey.keyZ);
-    expect(_shapeCount(tester), 1);
-    await _sendShortcut(
-      tester,
-      LogicalKeyboardKey.keyZ,
-      shift: true,
-    );
-    expect(_shapeCount(tester), 1);
-
-    await _sendShortcut(tester, LogicalKeyboardKey.keyZ);
-    await _sendShortcut(tester, LogicalKeyboardKey.keyZ);
-    expect(_shapeCount(tester), 0);
-    await _sendShortcut(tester, LogicalKeyboardKey.keyY);
-    expect(_shapeCount(tester), 1);
+    expect(find.text('Item Properties'), findsOneWidget);
   });
 
   testWidgets('selected shape rotation handle rotates the finished shape',
@@ -416,7 +461,7 @@ void main() {
     await tester.pump();
     expect(_shapeCount(tester), 1);
 
-    await _selectStructure(tester, 'Detached Structure');
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
     final touch = await tester.startGesture(
       const Offset(340, 290),
       kind: PointerDeviceKind.touch,
@@ -426,7 +471,7 @@ void main() {
     await tester.pump();
 
     expect(_shapeCount(tester), 1);
-    expect(find.text('Shape Properties'), findsOneWidget);
+    expect(find.text('Shape Properties'), findsNothing);
   });
 
   for (final size in const [Size(1440, 900), Size(1024, 768)]) {
@@ -501,6 +546,9 @@ void main() {
     await tester.tapAt(center + const Offset(80, 0));
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.tapAt(center);
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(find.text('Line Properties'), findsNothing);
     await tester.tapAt(center);
     await tester.pump();
     expect(find.text('Line Properties'), findsOneWidget);
@@ -616,7 +664,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_shapeCount(tester), 1);
-    expect(find.text('Treatment Area'), findsWidgets);
+    expect(find.text('Line Properties'), findsNothing);
   });
 
   testWidgets('right-click removes only the latest unfinished line point',
@@ -660,6 +708,10 @@ void main() {
     await tester.tapAt(const Offset(450, 326));
     await tester.pump();
     expect(find.text('Line Properties'), findsNothing);
+
+    await tester.tapAt(const Offset(450, 306));
+    await tester.pump();
+    expect(find.text('Shape Properties'), findsNothing);
 
     await tester.tapAt(const Offset(450, 306));
     await tester.pump();
@@ -733,6 +785,15 @@ Future<void> _selectBasicShape(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _selectPropertyTool(WidgetTester tester, String label) async {
+  await tester.ensureVisible(find.text('Property'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Property'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label));
+  await tester.pumpAndSettle();
+}
+
 Future<void> _selectLineTool(WidgetTester tester, String label) async {
   await tester.ensureVisible(find.text('Lines'));
   await tester.pumpAndSettle();
@@ -740,21 +801,4 @@ Future<void> _selectLineTool(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
   await tester.tap(find.text(label));
   await tester.pumpAndSettle();
-}
-
-Future<void> _sendShortcut(
-  WidgetTester tester,
-  LogicalKeyboardKey key, {
-  bool shift = false,
-}) async {
-  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-  if (shift) {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-  }
-  await tester.sendKeyEvent(key);
-  if (shift) {
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-  }
-  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-  await tester.pump();
 }

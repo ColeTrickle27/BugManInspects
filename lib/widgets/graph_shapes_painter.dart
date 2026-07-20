@@ -11,7 +11,6 @@ bool usesStyledSegmentRendering(GraphShape shape) =>
         .contains(shape.extraProperties['sourceTool']) ||
     (!shape.closed && shape.fillColor == null);
 
-@visibleForTesting
 String shapeMeasurementSummary(
   GraphShape shape,
   List<WallSegment> shapeSegments,
@@ -22,17 +21,18 @@ String shapeMeasurementSummary(
   }
 
   final squareFeet = _shapeAreaSquareFeet(shape, shapeSegments);
+  final linearFeet = shapeSegments.fold<double>(
+    0,
+    (total, segment) => total + segment.lengthFeet,
+  );
   if (preset.showsLinearAndAreaMeasurements) {
-    final linearFeet = shapeSegments.fold<double>(
-      0,
-      (total, segment) => total + segment.lengthFeet,
-    );
     return '${linearFeet.round()} lf • ${squareFeet.round()} sf';
   }
 
   if (preset.showsPropertyAreaMeasurements && shape.closed) {
     final acres = squareFeet / 43560;
-    return '${acres.toStringAsFixed(2)} ac • ${squareFeet.round()} sf';
+    return '${acres.toStringAsFixed(2)} ac • ${squareFeet.round()} sf • '
+        '${linearFeet.round()} lf';
   }
 
   return '';

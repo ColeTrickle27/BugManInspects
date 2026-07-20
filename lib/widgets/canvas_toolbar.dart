@@ -31,7 +31,10 @@ class CanvasToolbarAction {
 
   String get label => switch (kind) {
         CanvasToolbarActionKind.tool => tool!.label,
-        CanvasToolbarActionKind.preset => preset!.label,
+        CanvasToolbarActionKind.preset =>
+          preset == GraphDrawingPreset.propertyLine
+              ? 'Property Line (acres)'
+              : preset!.label,
         CanvasToolbarActionKind.marker => marker!.label,
       };
 
