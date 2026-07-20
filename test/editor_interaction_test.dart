@@ -205,6 +205,35 @@ void main() {
         LinePatternValue.xMarks);
   });
 
+  test('completed standard lines use measured segment rendering', () {
+    const line = GraphShape(
+      name: 'Line 1',
+      segmentIndexes: [0],
+      fillColor: Color(0xFFB6D94C),
+      fillOpacity: 0.3,
+      borderColor: Color(0xFF214D38),
+      borderWidth: 3,
+      pattern: GraphShapePattern.none,
+      closed: true,
+      rotationDegrees: 0,
+      extraProperties: {'sourceTool': 'wall'},
+    );
+    const topEdge = WallSegment(
+      start: GraphPoint(x: 0, y: 0),
+      end: GraphPoint(x: 240, y: 0),
+    );
+
+    expect(usesStyledSegmentRendering(line), isTrue);
+    expect(topEdge.measurementLabel, '10 lf');
+    expect(
+      wallMeasurementLabelCenter(
+        topEdge,
+        referencePoint: const Offset(120, 100),
+      ).dy,
+      lessThan(0),
+    );
+  });
+
   test('canvas markers use the same recognizable icon mapping as toolbar', () {
     for (final marker in {
       ...availableInspectionMarkers,

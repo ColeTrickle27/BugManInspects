@@ -180,6 +180,7 @@ class CanvasToolbar extends StatelessWidget {
     required this.traceLayerVisible,
     required this.onToggleTraceLayer,
     required this.onCollapse,
+    required this.onActionDoubleTapped,
     super.key,
   });
 
@@ -192,6 +193,7 @@ class CanvasToolbar extends StatelessWidget {
   final bool traceLayerVisible;
   final VoidCallback onToggleTraceLayer;
   final VoidCallback onCollapse;
+  final ValueChanged<CanvasToolbarAction> onActionDoubleTapped;
 
   void _activate(CanvasToolbarAction action) {
     switch (action.kind) {
@@ -239,6 +241,11 @@ class CanvasToolbar extends StatelessWidget {
                 selectedPreset: selectedDrawingPreset,
                 selectedMarker: selectedMarkerType,
                 onPressed: _activate,
+                onDoubleTap: () => onActionDoubleTapped(
+                  const CanvasToolbarAction.preset(
+                    GraphDrawingPreset.measurementLine,
+                  ),
+                ),
               ),
               const SizedBox(height: 8),
               _ActionPicker(
@@ -270,6 +277,11 @@ class CanvasToolbar extends StatelessWidget {
                 selectedPreset: selectedDrawingPreset,
                 selectedMarker: selectedMarkerType,
                 onPressed: _activate,
+                onDoubleTap: () => onActionDoubleTapped(
+                  const CanvasToolbarAction.preset(
+                    GraphDrawingPreset.mainStructure,
+                  ),
+                ),
               ),
               const SizedBox(height: 8),
               _ActionPicker(
@@ -313,6 +325,7 @@ class CanvasToolbar extends StatelessWidget {
                   selectedPreset: selectedDrawingPreset,
                   selectedMarker: selectedMarkerType,
                   onPressed: _activate,
+                  onDoubleTap: () => onActionDoubleTapped(action),
                 ),
                 const SizedBox(height: 8),
               ],
@@ -362,6 +375,11 @@ class CanvasQuickToolbar extends StatelessWidget {
     required this.onActionAdded,
     required this.onReset,
     required this.onCollapse,
+    required this.onToggleProperties,
+    required this.onToggleLayers,
+    required this.onDeleteSelection,
+    required this.propertiesSelected,
+    required this.layersSelected,
     super.key,
   });
 
@@ -373,6 +391,11 @@ class CanvasQuickToolbar extends StatelessWidget {
   final ValueChanged<CanvasToolbarAction> onActionAdded;
   final VoidCallback onReset;
   final VoidCallback onCollapse;
+  final VoidCallback onToggleProperties;
+  final VoidCallback onToggleLayers;
+  final VoidCallback onDeleteSelection;
+  final bool propertiesSelected;
+  final bool layersSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -381,64 +404,87 @@ class CanvasQuickToolbar extends StatelessWidget {
       onAcceptWithDetails: (details) => onActionAdded(details.data),
       builder: (context, candidates, rejected) => LayoutBuilder(
         builder: (context, constraints) {
-          final compact = constraints.maxWidth < 300;
-          return Material(
-            key: const ValueKey('canvas-quick-toolbar'),
-            elevation: 10,
-            color: candidates.isEmpty ? Colors.white : const Color(0xFFFFE7E2),
-            shape: StadiumBorder(
-              side: BorderSide(
-                color: candidates.isEmpty
-                    ? const Color(0xFF6D6E71)
-                    : const Color(0xFFCC2000),
+          final compact = constraints.maxWidth < 440;
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Material(
+              key: const ValueKey('canvas-quick-toolbar'),
+              elevation: 10,
+              color:
+                  candidates.isEmpty ? Colors.white : const Color(0xFFFFE7E2),
+              shape: StadiumBorder(
+                side: BorderSide(
+                  color: candidates.isEmpty
+                      ? const Color(0xFF6D6E71)
+                      : const Color(0xFFCC2000),
+                ),
               ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Hide quick toolbar',
-                    constraints: const BoxConstraints.tightFor(
-                      width: 36,
-                      height: 34,
-                    ),
-                    padding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onCollapse,
-                    icon: const Icon(Icons.keyboard_arrow_down),
-                  ),
-                  const SizedBox(height: 34, child: VerticalDivider()),
-                  for (final action in actions)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: _QuickActionButton(
-                        action: action,
-                        compact: compact,
-                        selected: action.isSelected(
-                          selectedTool: selectedTool,
-                          selectedPreset: selectedDrawingPreset,
-                          selectedMarker: selectedMarkerType,
-                        ),
-                        onPressed: () => onActionSelected(action),
-                      ),
-                    ),
-                  if (actions.length > 2) ...[
-                    const SizedBox(height: 34, child: VerticalDivider()),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     IconButton(
-                      tooltip: 'Reset quick toolbar',
+                      tooltip: 'Hide quick toolbar',
                       constraints: const BoxConstraints.tightFor(
                         width: 36,
                         height: 34,
                       ),
                       padding: EdgeInsets.zero,
                       visualDensity: VisualDensity.compact,
-                      onPressed: onReset,
-                      icon: const Icon(Icons.restart_alt),
+                      onPressed: onCollapse,
+                      icon: const Icon(Icons.keyboard_arrow_down),
                     ),
+                    const SizedBox(height: 34, child: VerticalDivider()),
+                    for (final action in actions)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: _QuickActionButton(
+                          action: action,
+                          compact: compact,
+                          selected: action.isSelected(
+                            selectedTool: selectedTool,
+                            selectedPreset: selectedDrawingPreset,
+                            selectedMarker: selectedMarkerType,
+                          ),
+                          onPressed: () => onActionSelected(action),
+                        ),
+                      ),
+                    const SizedBox(height: 34, child: VerticalDivider()),
+                    _QuickUtilityButton(
+                      icon: Icons.tune,
+                      tooltip: 'Properties panel',
+                      selected: propertiesSelected,
+                      onPressed: onToggleProperties,
+                    ),
+                    _QuickUtilityButton(
+                      icon: Icons.layers_outlined,
+                      tooltip: 'Layers panel',
+                      selected: layersSelected,
+                      onPressed: onToggleLayers,
+                    ),
+                    _QuickUtilityButton(
+                      icon: Icons.delete_outline,
+                      tooltip: 'Delete selection',
+                      selected: false,
+                      onPressed: onDeleteSelection,
+                    ),
+                    if (actions.length > 2) ...[
+                      const SizedBox(height: 34, child: VerticalDivider()),
+                      IconButton(
+                        tooltip: 'Reset quick toolbar',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 36,
+                          height: 34,
+                        ),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: onReset,
+                        icon: const Icon(Icons.restart_alt),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           );
@@ -519,6 +565,7 @@ class _ActionButton extends StatelessWidget {
     required this.selectedPreset,
     required this.selectedMarker,
     required this.onPressed,
+    this.onDoubleTap,
   });
 
   final CanvasToolbarAction action;
@@ -526,6 +573,7 @@ class _ActionButton extends StatelessWidget {
   final GraphDrawingPreset? selectedPreset;
   final GraphMarkerType selectedMarker;
   final ValueChanged<CanvasToolbarAction> onPressed;
+  final VoidCallback? onDoubleTap;
 
   @override
   Widget build(BuildContext context) {
@@ -537,20 +585,24 @@ class _ActionButton extends StatelessWidget {
         selectedMarker: selectedMarker,
       ),
       onPressed: () => onPressed(action),
+      onDoubleTap: onDoubleTap,
     );
     return _DraggableAction(action: action, child: child);
   }
 }
 
 class _DraggableAction extends StatelessWidget {
-  const _DraggableAction({required this.action, required this.child});
+  const _DraggableAction({
+    required this.action,
+    required this.child,
+  });
 
   final CanvasToolbarAction action;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return LongPressDraggable<CanvasToolbarAction>(
+    return Draggable<CanvasToolbarAction>(
       data: action,
       feedback: Material(
         color: Colors.transparent,
@@ -560,6 +612,33 @@ class _DraggableAction extends StatelessWidget {
       child: child,
     );
   }
+}
+
+class _QuickUtilityButton extends StatelessWidget {
+  const _QuickUtilityButton({
+    required this.icon,
+    required this.tooltip,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: tooltip,
+        child: IconButton(
+          constraints: const BoxConstraints.tightFor(width: 38, height: 34),
+          padding: EdgeInsets.zero,
+          visualDensity: VisualDensity.compact,
+          color: selected ? const Color(0xFFCC2000) : Colors.black87,
+          onPressed: onPressed,
+          icon: Icon(icon, size: 20),
+        ),
+      );
 }
 
 class _DragFeedback extends StatelessWidget {
@@ -591,11 +670,13 @@ class _ActionFace extends StatelessWidget {
     required this.action,
     required this.selected,
     required this.onPressed,
+    this.onDoubleTap,
   });
 
   final CanvasToolbarAction action;
   final bool selected;
   final VoidCallback onPressed;
+  final VoidCallback? onDoubleTap;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -606,6 +687,7 @@ class _ActionFace extends StatelessWidget {
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: onPressed,
+            onDoubleTap: onDoubleTap,
             child: _PickerFace(
               icon: action.icon,
               label: action.shortLabel,

@@ -141,16 +141,16 @@ void main() {
 
     await tester.tapAt(const Offset(280, 240));
     await tester.pump();
-    expect(find.text('0 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 0);
 
     await tester.tapAt(const Offset(500, 240));
     await tester.tapAt(const Offset(460, 430));
     await tester.pump();
-    expect(find.text('0 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 0);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
     expect(find.text('Shape Properties'), findsOneWidget);
   });
 
@@ -167,7 +167,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
 
-    expect(find.text('0 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 0);
   });
 
   testWidgets('double-click completes an in-progress structure',
@@ -185,7 +185,7 @@ void main() {
     await tester.tapAt(const Offset(460, 430));
     await tester.pump();
 
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
   });
 
   testWidgets('generic shapes require drag and support text editing',
@@ -199,11 +199,11 @@ void main() {
     await tester.pump();
     await tester.tapAt(const Offset(300, 250));
     await tester.pump();
-    expect(find.text('0 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 0);
 
     await tester.dragFrom(const Offset(300, 250), const Offset(220, 170));
     await tester.pump();
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
 
     await tester.tapAt(const Offset(410, 335));
     await tester.pump(const Duration(milliseconds: 40));
@@ -222,14 +222,14 @@ void main() {
     await _selectBasicShape(tester, 'Rectangle');
     await tester.dragFrom(const Offset(300, 250), const Offset(220, 170));
     await tester.pump();
-    expect(find.text('1 overlays'), findsOneWidget);
-    expect(find.text('4 lines'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
+    expect(_wallCount(tester), 4);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.tap(find.byTooltip('Delete selection'));
     await tester.pump();
 
-    expect(find.text('0 overlays'), findsOneWidget);
-    expect(find.text('0 lines'), findsOneWidget);
+    expect(_shapeCount(tester), 0);
+    expect(_wallCount(tester), 0);
   });
 
   testWidgets('main and quick toolbars collapse independently', (tester) async {
@@ -253,6 +253,61 @@ void main() {
     expect(find.byTooltip('Show quick toolbar'), findsOneWidget);
   });
 
+  testWidgets('properties and layers start collapsed in bottom toolbar',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(910, 794);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    expect(find.text('Properties'), findsNothing);
+    expect(find.text('Layers'), findsNothing);
+    expect(find.byTooltip('Properties panel'), findsOneWidget);
+    expect(find.byTooltip('Layers panel'), findsOneWidget);
+    expect(find.byTooltip('Delete selection'), findsOneWidget);
+
+    final viewerWidth = tester.getSize(find.byType(InteractiveViewer)).width;
+    await tester.tap(find.byTooltip('Layers panel'));
+    await tester.pump();
+    expect(find.text('Layers'), findsWidgets);
+    expect(tester.getSize(find.byType(InteractiveViewer)).width, viewerWidth);
+
+    await tester.tap(find.byTooltip('Properties panel'));
+    await tester.pump();
+    expect(find.text('Properties'), findsWidgets);
+    expect(tester.getSize(find.byType(InteractiveViewer)).width, viewerWidth);
+  });
+
+  testWidgets('top toolbar keeps file and canvas options collapsed',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(910, 794);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    expect(find.byTooltip('Undo'), findsOneWidget);
+    expect(find.byTooltip('Redo'), findsOneWidget);
+    expect(find.text('Save'), findsNothing);
+    expect(find.text('Export'), findsNothing);
+    expect(find.text('Upload'), findsNothing);
+    expect(find.text('20:1'), findsNothing);
+
+    await tester.tap(find.byTooltip('File actions'));
+    await tester.pumpAndSettle();
+    expect(find.text('Save'), findsOneWidget);
+    expect(find.text('Export'), findsOneWidget);
+    expect(find.text('Upload'), findsOneWidget);
+    await tester.tapAt(const Offset(600, 500));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Canvas options'));
+    await tester.pumpAndSettle();
+    expect(find.text('Snap to grid'), findsOneWidget);
+    expect(find.text('Snap to objects'), findsOneWidget);
+    expect(find.text('10:1'), findsOneWidget);
+    expect(find.text('20:1'), findsNothing);
+  });
+
   testWidgets('main toolbar tools can be dragged into quick tools',
       (tester) async {
     tester.view.devicePixelRatio = 1;
@@ -271,7 +326,7 @@ void main() {
       tester.getCenter(quickMeasure),
       kind: PointerDeviceKind.mouse,
     );
-    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 50));
     await gesture.moveTo(tester.getCenter(quickToolbar));
     await tester.pump();
     await gesture.up();
@@ -301,32 +356,51 @@ void main() {
     await _selectBasicShape(tester, 'Rectangle');
     await tester.dragFrom(const Offset(300, 250), const Offset(220, 170));
     await tester.pump();
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
 
     await _selectStructure(tester, 'Concrete Slab');
     await tester.tapAt(const Offset(410, 335));
     await tester.pump();
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
     expect(find.text('Shape Properties'), findsOneWidget);
 
     await tester.dragFrom(const Offset(410, 335), const Offset(120, 80));
     await tester.pump();
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
 
     await _sendShortcut(tester, LogicalKeyboardKey.keyZ);
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
     await _sendShortcut(
       tester,
       LogicalKeyboardKey.keyZ,
       shift: true,
     );
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
 
     await _sendShortcut(tester, LogicalKeyboardKey.keyZ);
     await _sendShortcut(tester, LogicalKeyboardKey.keyZ);
-    expect(find.text('0 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 0);
     await _sendShortcut(tester, LogicalKeyboardKey.keyY);
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
+  });
+
+  testWidgets('selected shape rotation handle rotates the finished shape',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    await _selectBasicShape(tester, 'Rectangle');
+    await tester.dragFrom(const Offset(300, 250), const Offset(220, 170));
+    await tester.pump();
+    expect(_shapeCount(tester), 1);
+    expect(_firstShapeRotation(tester), 0);
+
+    await tester.dragFrom(const Offset(410, 222), const Offset(70, 55));
+    await tester.pump();
+
+    expect(_firstShapeRotation(tester), isNot(closeTo(0, 0.1)));
   });
 
   testWidgets(
@@ -340,7 +414,7 @@ void main() {
     await _selectBasicShape(tester, 'Rectangle');
     await tester.dragFrom(const Offset(250, 220), const Offset(180, 140));
     await tester.pump();
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
 
     await _selectStructure(tester, 'Detached Structure');
     final touch = await tester.startGesture(
@@ -351,7 +425,7 @@ void main() {
     await touch.up();
     await tester.pump();
 
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
     expect(find.text('Shape Properties'), findsOneWidget);
   });
 
@@ -420,8 +494,8 @@ void main() {
         .transformationController!
         .value;
     expect(after.entry(0, 3), isNot(closeTo(before.entry(0, 3), 0.1)));
-    expect(find.text('0 overlays'), findsOneWidget);
-    expect(find.text('0 items'), findsOneWidget);
+    expect(_shapeCount(tester), 0);
+    expect(_annotationCount(tester), 0);
 
     await tester.tapAt(center - const Offset(80, 0));
     await tester.tapAt(center + const Offset(80, 0));
@@ -446,27 +520,26 @@ void main() {
         .clone();
 
     final initial = matrix();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendEventToBinding(PointerScrollEvent(
       position: center,
       scrollDelta: const Offset(0, -120),
       kind: PointerDeviceKind.mouse,
     ));
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(
         matrix().getMaxScaleOnAxis(), greaterThan(initial.getMaxScaleOnAxis()));
 
-    final beforeAlt = matrix();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    final beforeControl = matrix();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendEventToBinding(PointerScrollEvent(
       position: center,
       scrollDelta: const Offset(0, 80),
       kind: PointerDeviceKind.mouse,
     ));
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
-    expect(matrix().entry(0, 3), isNot(closeTo(beforeAlt.entry(0, 3), 0.1)));
+    expect(
+        matrix().entry(0, 3), isNot(closeTo(beforeControl.entry(0, 3), 0.1)));
 
     final beforeShift = matrix();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -494,7 +567,7 @@ void main() {
     await tester.tapAt(const Offset(500, 420));
     await tester.pumpAndSettle();
 
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
     expect(find.byType(AlertDialog), findsNothing);
   });
 
@@ -517,7 +590,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
     expect(find.byType(AlertDialog), findsNothing);
   });
 
@@ -542,7 +615,7 @@ void main() {
     await tester.tapAt(const Offset(480, 430));
     await tester.pumpAndSettle();
 
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
     expect(find.text('Treatment Area'), findsWidgets);
   });
 
@@ -569,7 +642,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 40));
     await tester.tapAt(const Offset(500, 430));
     await tester.pumpAndSettle();
-    expect(find.text('1 overlays'), findsOneWidget);
+    expect(_shapeCount(tester), 1);
   });
 
   testWidgets('thin line selection uses reduced but practical tolerance',
@@ -607,6 +680,23 @@ Future<void> _pumpEditor(WidgetTester tester) async {
   await tester.pumpWidget(MaterialApp(home: GraphCanvasScreen(job: job)));
   await tester.pumpAndSettle();
 }
+
+dynamic _graphOverlayPainter(WidgetTester tester) => tester
+    .widget<CustomPaint>(find.byKey(const ValueKey('graph-canvas-paint')))
+    .foregroundPainter as dynamic;
+
+int _shapeCount(WidgetTester tester) =>
+    (_graphOverlayPainter(tester).shapes as List).length;
+
+int _wallCount(WidgetTester tester) =>
+    (_graphOverlayPainter(tester).wallSegments as List).length;
+
+int _annotationCount(WidgetTester tester) =>
+    (_graphOverlayPainter(tester).annotations as List).length;
+
+double _firstShapeRotation(WidgetTester tester) =>
+    (_graphOverlayPainter(tester).shapes as List).first.rotationDegrees
+        as double;
 
 Future<void> _secondaryClick(WidgetTester tester, Offset position) async {
   final gesture = await tester.createGesture(

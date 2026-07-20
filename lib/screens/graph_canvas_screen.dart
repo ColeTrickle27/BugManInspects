@@ -68,8 +68,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   bool _gridVisible = true;
   bool _snapToGrid = true;
   bool _snapToObjects = true;
-  bool? _propertiesCollapsedOverride;
-  bool _layersCollapsed = false;
+  _SidePanelMode? _sidePanelMode;
+  bool _layersCollapsed = true;
   bool _mainToolbarCollapsed = false;
   bool _quickToolbarCollapsed = false;
   List<CanvasToolbarAction> _quickToolbarActions = const [
@@ -243,6 +243,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       case CanvasToolbarActionKind.marker:
         _selectMarker(action.marker!);
     }
+  }
+
+  void _inspectToolbarAction(CanvasToolbarAction action) {
+    _activateToolbarAction(action);
+    setState(() {
+      _sidePanelMode = _SidePanelMode.properties;
+      _canvasStatus = '${action.label} properties shown';
+    });
   }
 
   void _addQuickToolbarAction(CanvasToolbarAction action) {
@@ -533,8 +541,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _pointerDownHitSelection = null;
         return;
       }
-      _pointerDownHitSelection =
-          _selectionAt(GraphPoint.fromOffset(sceneOffset));
+      final pointerPoint = GraphPoint.fromOffset(sceneOffset);
+      final currentSelection = _selection;
+      final selectedTarget = currentSelection == null
+          ? null
+          : _dragTargetForSelection(currentSelection, pointerPoint);
+      if (selectedTarget?.kind == _DragKind.shapeResize ||
+          selectedTarget?.kind == _DragKind.shapeRotation) {
+        _pointerDownHitSelection = currentSelection;
+        _startDragForSelection(currentSelection!, pointerPoint);
+        return;
+      }
+      _pointerDownHitSelection = _selectionAt(pointerPoint);
 
       final hitSelection = _pointerDownHitSelection;
       if (hitSelection != null) {
@@ -542,6 +560,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           _selection = hitSelection;
           _interaction.setSelected(_interactionReference(hitSelection));
           _canvasStatus = _selectionStatus(hitSelection);
+          _sidePanelMode = _SidePanelMode.properties;
         });
         if (_isSelectionEditable(hitSelection)) {
           _startDragForSelection(
@@ -904,12 +923,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
     final keyboard = HardwareKeyboard.instance;
     if (keyboard.isControlPressed || keyboard.isMetaPressed) {
-      final factor = math.exp(-event.scrollDelta.dy / 500);
-      _zoomAt(event.localPosition, factor);
-    } else if (keyboard.isAltPressed) {
       _translateViewport(dx: -event.scrollDelta.dy);
     } else if (keyboard.isShiftPressed) {
       _translateViewport(dy: -event.scrollDelta.dy);
+    } else {
+      final factor = math.exp(-event.scrollDelta.dy / 500);
+      _zoomAt(event.localPosition, factor);
     }
   }
 
@@ -1251,6 +1270,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _wallSegments = <WallSegment>[..._wallSegments, ...newSegments];
       _shapes = <GraphShape>[..._shapes, shape];
       _selection = _Selection.shape(_shapes.length - 1);
+      _sidePanelMode = _SidePanelMode.properties;
       _undoStack.add(
         _UndoEntry(
           _UndoKind.shapeFinish,
@@ -1525,6 +1545,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       );
       _shapes = <GraphShape>[..._shapes, shape];
       _selection = _Selection.shape(_shapes.length - 1);
+      _sidePanelMode = _SidePanelMode.properties;
       _interaction.setSelected(_interactionReference(_selection!));
       _undoStack.add(
         _UndoEntry(_UndoKind.snapshot, previousSnapshot: before),
@@ -1925,6 +1946,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _selection = selection;
       _interaction.setSelected(_interactionReference(selection));
       _canvasStatus = _selectionStatus(selection);
+      _sidePanelMode = _SidePanelMode.properties;
     });
     return true;
   }
@@ -3137,9 +3159,15 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         closed: result.closeShape && canCloseShape,
         rotationDegrees: 0,
         preset: _selectedDrawingPreset,
+        extraProperties: {
+          'sourceTool': _selectedTool.name,
+        },
       );
 
       _shapes = <GraphShape>[..._shapes, shape];
+      _selection = _Selection.shape(_shapes.length - 1);
+      _interaction.setSelected(_interactionReference(_selection!));
+      _sidePanelMode = _SidePanelMode.properties;
       _activeWallStart = null;
       _activePathStartPoint = null;
       _pendingCurveControlPoint = null;
@@ -4025,12 +4053,22 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _togglePropertiesCollapsed() {
-    final currentlyCollapsed =
-        _propertiesCollapsedOverride ?? MediaQuery.sizeOf(context).width < 700;
     setState(() {
-      _propertiesCollapsedOverride = !currentlyCollapsed;
+      _sidePanelMode = _sidePanelMode == _SidePanelMode.properties
+          ? null
+          : _SidePanelMode.properties;
       _canvasStatus =
-          !currentlyCollapsed ? 'Properties collapsed' : 'Properties shown';
+          _sidePanelMode == null ? 'Properties collapsed' : 'Properties shown';
+    });
+  }
+
+  void _toggleLayersPanel() {
+    setState(() {
+      _sidePanelMode = _sidePanelMode == _SidePanelMode.layers
+          ? null
+          : _SidePanelMode.layers;
+      _canvasStatus =
+          _sidePanelMode == null ? 'Layers collapsed' : 'Layers shown';
     });
   }
 
@@ -4801,11 +4839,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final propertiesCollapsed =
-        _propertiesCollapsedOverride ?? MediaQuery.sizeOf(context).width < 700;
-    final sidePanelWidth = propertiesCollapsed ? 44.0 : 268.0;
-    final canvasRightInset = propertiesCollapsed ? 68.0 : 292.0;
-    final canvasLeftInset = _mainToolbarCollapsed ? 68.0 : 96.0;
+    const sidePanelWidth = 268.0;
+    const canvasRightInset = 12.0;
+    const canvasLeftInset = 12.0;
     final canvasBottomInset = _quickToolbarCollapsed ? 12.0 : 82.0;
     final documentTitle = _document.customer.displayName;
 
@@ -4919,6 +4955,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onCollapse: () => setState(
                             () => _mainToolbarCollapsed = true,
                           ),
+                          onActionDoubleTapped: _inspectToolbarAction,
                         ),
                       )
                     else
@@ -4968,6 +5005,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                                 onActionSelected: _activateToolbarAction,
                                 onActionAdded: _addQuickToolbarAction,
                                 onReset: _resetQuickToolbar,
+                                propertiesSelected:
+                                    _sidePanelMode == _SidePanelMode.properties,
+                                layersSelected:
+                                    _sidePanelMode == _SidePanelMode.layers,
+                                onToggleProperties: _togglePropertiesCollapsed,
+                                onToggleLayers: _toggleLayersPanel,
+                                onDeleteSelection: _deleteSelection,
                                 onCollapse: () => setState(
                                   () => _quickToolbarCollapsed = true,
                                 ),
@@ -5002,65 +5046,61 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                         ),
                       ),
                     ),
-                    Positioned(
-                      top: 54,
-                      right: 12,
-                      bottom: 12,
-                      width: sidePanelWidth,
-                      child: propertiesCollapsed
-                          ? _CollapsedPanelTab(
-                              icon: Icons.tune,
-                              label: 'Props',
-                              onPressed: _togglePropertiesCollapsed,
-                            )
-                          : _PropertiesSidebar(
-                              selection: _selection,
-                              annotations: _annotations,
-                              wallSegments: _wallSegments,
-                              shapes: _shapes,
-                              freehandStrokes: _freehandStrokes,
-                              layerSettings: _layerSettings,
-                              traceLayerVisible: _traceLayerVisible,
-                              layersCollapsed: _layersCollapsed,
-                              onCollapsePanel: _togglePropertiesCollapsed,
-                              onToggleLayersCollapsed: _toggleLayersCollapsed,
-                              onToggleLayerVisibility: _toggleLayerVisibility,
-                              onToggleLayerLock: _toggleLayerLock,
-                              onAnnotationLabelChanged: _updateAnnotationLabel,
-                              onAnnotationMarkerTypeChanged:
-                                  _updateAnnotationMarkerType,
-                              onAnnotationColorChanged: _updateAnnotationColor,
-                              onAnnotationSizeChanged: _updateAnnotationSize,
-                              onAnnotationRotationChanged:
-                                  _updateAnnotationRotation,
-                              onAnnotationNoteChanged: _updateAnnotationNote,
-                              onTextFontSizeChanged: _updateTextFontSize,
-                              onTextBoldChanged: _updateTextBold,
-                              onTextItalicChanged: _updateTextItalic,
-                              onTextColorChanged: _updateTextColor,
-                              onTextBackgroundChanged: _updateTextBackground,
-                              onTextBorderChanged: _updateTextBorder,
-                              onSetMarkerDefault: _setMarkerDefault,
-                              onSetTextDefault: _setTextDefault,
-                              onSegmentColorChanged: _updateSegmentColor,
-                              onSegmentPatternChanged: _updateSegmentPattern,
-                              onSegmentWidthChanged: _updateSegmentWidth,
-                              onSegmentArrowChanged: _updateSegmentArrow,
-                              onSetLineDefault: _setLineDefault,
-                              onFreehandColorChanged: _updateFreehandColor,
-                              onFreehandWidthChanged: _updateFreehandWidth,
-                              onFreehandOpacityChanged: _updateFreehandOpacity,
-                              onSetFreehandDefault: _setFreehandDefault,
-                              onShapeNameChanged: _updateShapeName,
-                              onShapeFillChanged: _updateShapeFill,
-                              onShapeBorderColorChanged:
-                                  _updateShapeBorderColor,
-                              onShapeBorderWidthChanged:
-                                  _updateShapeBorderWidth,
-                              onShapePatternChanged: _updateShapePattern,
-                              onSetShapeDefault: _setShapeDefault,
-                            ),
-                    ),
+                    if (_sidePanelMode != null)
+                      Positioned(
+                        top: 54,
+                        right: 12,
+                        bottom: 82,
+                        width: sidePanelWidth,
+                        child: _PropertiesSidebar(
+                          layersOnly: _sidePanelMode == _SidePanelMode.layers,
+                          selection: _selection,
+                          annotations: _annotations,
+                          wallSegments: _wallSegments,
+                          shapes: _shapes,
+                          freehandStrokes: _freehandStrokes,
+                          layerSettings: _layerSettings,
+                          traceLayerVisible: _traceLayerVisible,
+                          layersCollapsed: _layersCollapsed,
+                          onCollapsePanel: () => setState(
+                            () => _sidePanelMode = null,
+                          ),
+                          onToggleLayersCollapsed: _toggleLayersCollapsed,
+                          onToggleLayerVisibility: _toggleLayerVisibility,
+                          onToggleLayerLock: _toggleLayerLock,
+                          onAnnotationLabelChanged: _updateAnnotationLabel,
+                          onAnnotationMarkerTypeChanged:
+                              _updateAnnotationMarkerType,
+                          onAnnotationColorChanged: _updateAnnotationColor,
+                          onAnnotationSizeChanged: _updateAnnotationSize,
+                          onAnnotationRotationChanged:
+                              _updateAnnotationRotation,
+                          onAnnotationNoteChanged: _updateAnnotationNote,
+                          onTextFontSizeChanged: _updateTextFontSize,
+                          onTextBoldChanged: _updateTextBold,
+                          onTextItalicChanged: _updateTextItalic,
+                          onTextColorChanged: _updateTextColor,
+                          onTextBackgroundChanged: _updateTextBackground,
+                          onTextBorderChanged: _updateTextBorder,
+                          onSetMarkerDefault: _setMarkerDefault,
+                          onSetTextDefault: _setTextDefault,
+                          onSegmentColorChanged: _updateSegmentColor,
+                          onSegmentPatternChanged: _updateSegmentPattern,
+                          onSegmentWidthChanged: _updateSegmentWidth,
+                          onSegmentArrowChanged: _updateSegmentArrow,
+                          onSetLineDefault: _setLineDefault,
+                          onFreehandColorChanged: _updateFreehandColor,
+                          onFreehandWidthChanged: _updateFreehandWidth,
+                          onFreehandOpacityChanged: _updateFreehandOpacity,
+                          onSetFreehandDefault: _setFreehandDefault,
+                          onShapeNameChanged: _updateShapeName,
+                          onShapeFillChanged: _updateShapeFill,
+                          onShapeBorderColorChanged: _updateShapeBorderColor,
+                          onShapeBorderWidthChanged: _updateShapeBorderWidth,
+                          onShapePatternChanged: _updateShapePattern,
+                          onSetShapeDefault: _setShapeDefault,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -5126,8 +5166,16 @@ class _TopEditorToolbar extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Row(
             children: [
-              _TopButton(icon: Icons.undo, label: 'Undo', onPressed: onUndo),
-              _TopButton(icon: Icons.redo, label: 'Redo', onPressed: onRedo),
+              _IconOnlyButton(
+                icon: Icons.undo,
+                tooltip: 'Undo',
+                onPressed: onUndo,
+              ),
+              _IconOnlyButton(
+                icon: Icons.redo,
+                tooltip: 'Redo',
+                onPressed: onRedo,
+              ),
               const _ToolbarDivider(),
               _TopButton(
                   icon: Icons.done, label: 'Finish', onPressed: onFinish),
@@ -5137,20 +5185,47 @@ class _TopEditorToolbar extends StatelessWidget {
                 onPressed: onClear,
               ),
               const _ToolbarDivider(),
-              _TopButton(
-                icon: Icons.save_outlined,
-                label: 'Save',
-                onPressed: onSave,
-              ),
-              _TopButton(
-                icon: Icons.ios_share,
-                label: 'Export',
-                onPressed: onExport,
-              ),
-              _TopButton(
-                icon: Icons.cloud_upload_outlined,
-                label: 'Upload',
-                onPressed: onUpload,
+              PopupMenuButton<_EditorFileAction>(
+                tooltip: 'File actions',
+                onSelected: (action) => switch (action) {
+                  _EditorFileAction.save => onSave(),
+                  _EditorFileAction.export => onExport(),
+                  _EditorFileAction.upload => onUpload(),
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: _EditorFileAction.save,
+                    child: ListTile(
+                      leading: Icon(Icons.save_outlined),
+                      title: Text('Save'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _EditorFileAction.export,
+                    child: ListTile(
+                      leading: Icon(Icons.ios_share),
+                      title: Text('Export'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _EditorFileAction.upload,
+                    child: ListTile(
+                      leading: Icon(Icons.cloud_upload_outlined),
+                      title: Text('Upload'),
+                    ),
+                  ),
+                ],
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 10),
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder_outlined, size: 18),
+                      SizedBox(width: 5),
+                      Text('File'),
+                      Icon(Icons.arrow_drop_down),
+                    ],
+                  ),
+                ),
               ),
               const _ToolbarDivider(),
               _IconOnlyButton(
@@ -5169,38 +5244,69 @@ class _TopEditorToolbar extends StatelessWidget {
                 onPressed: onZoomIn,
               ),
               const _ToolbarDivider(),
-              _ToggleButton(
-                label: 'Grid',
-                selected: gridVisible,
-                onPressed: onToggleGrid,
-              ),
-              _ToggleButton(
-                label: 'Snap Grid',
-                selected: snapToGrid,
-                onPressed: onToggleSnapToGrid,
-              ),
-              _ToggleButton(
-                label: 'Snap Obj',
-                selected: snapToObjects,
-                onPressed: onToggleSnapToObjects,
-              ),
-              const SizedBox(width: 8),
-              DropdownButton<String>(
-                value: scaleLabel,
-                underline: const SizedBox.shrink(),
-                items: const [
-                  DropdownMenuItem(value: '1:1', child: Text('1:1')),
-                  DropdownMenuItem(value: '2:1', child: Text('2:1')),
-                  DropdownMenuItem(value: '3:1', child: Text('3:1')),
-                  DropdownMenuItem(value: '4:1', child: Text('4:1')),
-                  DropdownMenuItem(value: '10:1', child: Text('10:1')),
-                  DropdownMenuItem(value: '20:1', child: Text('20:1')),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    onScaleChanged(value);
+              PopupMenuButton<_EditorOptionAction>(
+                tooltip: 'Canvas options',
+                onSelected: (action) {
+                  switch (action) {
+                    case _EditorOptionAction.grid:
+                      onToggleGrid();
+                    case _EditorOptionAction.snapGrid:
+                      onToggleSnapToGrid();
+                    case _EditorOptionAction.snapObjects:
+                      onToggleSnapToObjects();
+                    case _EditorOptionAction.scale1:
+                      onScaleChanged('1:1');
+                    case _EditorOptionAction.scale2:
+                      onScaleChanged('2:1');
+                    case _EditorOptionAction.scale3:
+                      onScaleChanged('3:1');
+                    case _EditorOptionAction.scale4:
+                      onScaleChanged('4:1');
+                    case _EditorOptionAction.scale10:
+                      onScaleChanged('10:1');
                   }
                 },
+                itemBuilder: (context) => [
+                  CheckedPopupMenuItem(
+                    value: _EditorOptionAction.grid,
+                    checked: gridVisible,
+                    child: const Text('Grid'),
+                  ),
+                  CheckedPopupMenuItem(
+                    value: _EditorOptionAction.snapGrid,
+                    checked: snapToGrid,
+                    child: const Text('Snap to grid'),
+                  ),
+                  CheckedPopupMenuItem(
+                    value: _EditorOptionAction.snapObjects,
+                    checked: snapToObjects,
+                    child: const Text('Snap to objects'),
+                  ),
+                  const PopupMenuDivider(),
+                  for (final entry in const {
+                    _EditorOptionAction.scale1: '1:1',
+                    _EditorOptionAction.scale2: '2:1',
+                    _EditorOptionAction.scale3: '3:1',
+                    _EditorOptionAction.scale4: '4:1',
+                    _EditorOptionAction.scale10: '10:1',
+                  }.entries)
+                    CheckedPopupMenuItem(
+                      value: entry.key,
+                      checked: scaleLabel == entry.value,
+                      child: Text(entry.value),
+                    ),
+                ],
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 10),
+                  child: Row(
+                    children: [
+                      Icon(Icons.tune, size: 18),
+                      SizedBox(width: 5),
+                      Text('Options'),
+                      Icon(Icons.arrow_drop_down),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -5259,31 +5365,6 @@ class _IconOnlyButton extends StatelessWidget {
   }
 }
 
-class _ToggleButton extends StatelessWidget {
-  const _ToggleButton({
-    required this.label,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 3),
-      child: FilterChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => onPressed(),
-        visualDensity: VisualDensity.compact,
-      ),
-    );
-  }
-}
-
 class _ToolbarDivider extends StatelessWidget {
   const _ToolbarDivider();
 
@@ -5298,52 +5379,9 @@ class _ToolbarDivider extends StatelessWidget {
   }
 }
 
-class _CollapsedPanelTab extends StatelessWidget {
-  const _CollapsedPanelTab({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      elevation: 6,
-      borderRadius: BorderRadius.circular(8),
-      color: Colors.white,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onPressed,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: Theme.of(context).colorScheme.primary),
-              const SizedBox(height: 6),
-              RotatedBox(
-                quarterTurns: 1,
-                child: Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _PropertiesSidebar extends StatelessWidget {
   const _PropertiesSidebar({
+    required this.layersOnly,
     required this.selection,
     required this.annotations,
     required this.wallSegments,
@@ -5387,6 +5425,7 @@ class _PropertiesSidebar extends StatelessWidget {
     required this.onSetShapeDefault,
   });
 
+  final bool layersOnly;
   final _Selection? selection;
   final List<GraphAnnotation> annotations;
   final List<WallSegment> wallSegments;
@@ -5434,6 +5473,56 @@ class _PropertiesSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (layersOnly) {
+      return Material(
+        elevation: 6,
+        borderRadius: BorderRadius.circular(8),
+        color: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Layers',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Collapse layers',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onCollapsePanel,
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: _LayersPanel(
+                    wallCount: wallSegments.length,
+                    shapeCount: shapes.length,
+                    itemCount: annotations
+                        .where((item) => item.kind != GraphAnnotationKind.photo)
+                        .length,
+                    photoCount: annotations
+                        .where((item) => item.kind == GraphAnnotationKind.photo)
+                        .length,
+                    layerSettings: layerSettings,
+                    traceLayerVisible: traceLayerVisible,
+                    onCollapse: onCollapsePanel,
+                    onToggleVisibility: onToggleLayerVisibility,
+                    onToggleLock: onToggleLayerLock,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Material(
       elevation: 6,
       borderRadius: BorderRadius.circular(8),
@@ -5461,38 +5550,6 @@ class _PropertiesSidebar extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Expanded(child: _buildContent(context)),
-            const Divider(height: 20),
-            if (layersCollapsed)
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: onToggleLayersCollapsed,
-                  icon: const Icon(Icons.layers_outlined),
-                  label: const Text('Show Layers'),
-                ),
-              )
-            else
-              _LayersPanel(
-                wallCount: wallSegments.length,
-                shapeCount: shapes.length,
-                itemCount: annotations
-                    .where(
-                      (annotation) =>
-                          annotation.kind != GraphAnnotationKind.photo,
-                    )
-                    .length,
-                photoCount: annotations
-                    .where(
-                      (annotation) =>
-                          annotation.kind == GraphAnnotationKind.photo,
-                    )
-                    .length,
-                layerSettings: layerSettings,
-                traceLayerVisible: traceLayerVisible,
-                onCollapse: onToggleLayersCollapsed,
-                onToggleVisibility: onToggleLayerVisibility,
-                onToggleLock: onToggleLayerLock,
-              ),
           ],
         ),
       ),
@@ -5942,11 +5999,6 @@ class _PropertiesSidebar extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _InspectorValue(
-            label: 'Rotation',
-            value: '${shape.rotationDegrees.round()} deg',
-          ),
-          const SizedBox(height: 8),
-          _InspectorValue(
             label: 'Linear ft',
             value: _shapeLinearFeet(shape).toStringAsFixed(1),
           ),
@@ -5954,11 +6006,6 @@ class _PropertiesSidebar extends StatelessWidget {
           _InspectorValue(
             label: 'Square ft',
             value: _shapeSquareFeet(shape).toStringAsFixed(1),
-          ),
-          const SizedBox(height: 8),
-          _InspectorValue(
-            label: 'Segments',
-            value: shape.segmentIndexes.length.toString(),
           ),
         ],
       );
@@ -6509,6 +6556,7 @@ class _CanvasSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
+      key: const ValueKey('graph-canvas-paint'),
       size: canvasSize,
       painter: GraphGridPainter(visible: gridVisible),
       foregroundPainter: _GraphOverlayPainter(
@@ -6980,6 +7028,21 @@ class _UndoEntry {
   final int? previousActivePathStartSegmentIndex;
   final int? shapeIndex;
   final int addedSegmentCount;
+}
+
+enum _SidePanelMode { properties, layers }
+
+enum _EditorFileAction { save, export, upload }
+
+enum _EditorOptionAction {
+  grid,
+  snapGrid,
+  snapObjects,
+  scale1,
+  scale2,
+  scale3,
+  scale4,
+  scale10,
 }
 
 enum _DragKind {

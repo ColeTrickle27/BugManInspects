@@ -6,7 +6,10 @@ import 'wall_segments_painter.dart';
 
 @visibleForTesting
 bool usesStyledSegmentRendering(GraphShape shape) =>
-    shape.preset?.kind == GraphDrawingPresetKind.line;
+    shape.preset?.kind == GraphDrawingPresetKind.line ||
+    const {'wall', 'arrow', 'curve'}
+        .contains(shape.extraProperties['sourceTool']) ||
+    (!shape.closed && shape.fillColor == null);
 
 @visibleForTesting
 String shapeMeasurementSummary(
@@ -88,7 +91,8 @@ class GraphShapesPainter extends CustomPainter {
           hoveredSegmentIndex: null,
           activeWallStart: null,
           previewSegment: null,
-          drawMeasurements: shape.preset == GraphDrawingPreset.measurementLine,
+          drawMeasurements: true,
+          measurementReferencePoint: shape.closed ? bounds.center : null,
         ).paint(canvas, size);
       } else if (shape.fillColor != null) {
         canvas.drawPath(
@@ -110,6 +114,7 @@ class GraphShapesPainter extends CustomPainter {
             previewSegment: null,
             paintSegments: false,
             drawEndpoints: false,
+            measurementReferencePoint: bounds.center,
           ).paint(canvas, size);
         }
       }

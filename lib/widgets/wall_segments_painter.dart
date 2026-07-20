@@ -5,6 +5,32 @@ import 'package:flutter/material.dart';
 import '../models/graph_point.dart';
 import '../models/wall_segment.dart';
 
+@visibleForTesting
+Offset wallMeasurementLabelCenter(
+  WallSegment segment, {
+  Offset? referencePoint,
+}) {
+  final start = segment.start.offset;
+  final end = segment.end.offset;
+  final dx = end.dx - start.dx;
+  final dy = end.dy - start.dy;
+  final length = math.sqrt((dx * dx) + (dy * dy));
+  final midpoint = Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
+  if (length == 0) {
+    return midpoint;
+  }
+  final perpendicular = Offset(-dy / length, dx / length);
+  var labelCenter = midpoint + (perpendicular * 18);
+  if (referencePoint != null) {
+    final oppositeCenter = midpoint - (perpendicular * 18);
+    if ((oppositeCenter - referencePoint).distanceSquared >
+        (labelCenter - referencePoint).distanceSquared) {
+      labelCenter = oppositeCenter;
+    }
+  }
+  return labelCenter;
+}
+
 class WallSegmentsPainter extends CustomPainter {
   const WallSegmentsPainter({
     required this.segments,
@@ -15,6 +41,7 @@ class WallSegmentsPainter extends CustomPainter {
     this.drawMeasurements = true,
     this.paintSegments = true,
     this.drawEndpoints = true,
+    this.measurementReferencePoint,
     this.hiddenSegmentIndexes = const <int>{},
   });
 
@@ -26,6 +53,7 @@ class WallSegmentsPainter extends CustomPainter {
   final bool drawMeasurements;
   final bool paintSegments;
   final bool drawEndpoints;
+  final Offset? measurementReferencePoint;
   final Set<int> hiddenSegmentIndexes;
 
   @override
@@ -323,9 +351,10 @@ class WallSegmentsPainter extends CustomPainter {
       return;
     }
 
-    final midpoint = Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
-    final perpendicular = Offset(-dy / length, dx / length);
-    final labelCenter = midpoint + (perpendicular * 18);
+    final labelCenter = wallMeasurementLabelCenter(
+      segment,
+      referencePoint: measurementReferencePoint,
+    );
     final textPainter = TextPainter(
       text: TextSpan(
         text: segment.measurementLabel,
