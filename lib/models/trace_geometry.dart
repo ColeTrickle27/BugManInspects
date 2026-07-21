@@ -116,6 +116,7 @@ class TraceGeometry {
     required this.geoPoints,
     required this.canvasPoints,
     this.closed = true,
+    this.metersPerCanvasUnit,
   });
 
   factory TraceGeometry.fromJson(Map<String, Object?> json) => TraceGeometry(
@@ -135,6 +136,7 @@ class TraceGeometry {
                 ))
             .toList(),
         closed: json['closed'] as bool? ?? true,
+        metersPerCanvasUnit: (json['metersPerCanvasUnit'] as num?)?.toDouble(),
       );
 
   final String id;
@@ -142,6 +144,24 @@ class TraceGeometry {
   final List<GeoPoint> geoPoints;
   final List<GraphPoint> canvasPoints;
   final bool closed;
+  final double? metersPerCanvasUnit;
+
+  TraceGeometry copyWith({
+    String? id,
+    String? label,
+    List<GeoPoint>? geoPoints,
+    List<GraphPoint>? canvasPoints,
+    bool? closed,
+    double? metersPerCanvasUnit,
+  }) =>
+      TraceGeometry(
+        id: id ?? this.id,
+        label: label ?? this.label,
+        geoPoints: geoPoints ?? this.geoPoints,
+        canvasPoints: canvasPoints ?? this.canvasPoints,
+        closed: closed ?? this.closed,
+        metersPerCanvasUnit: metersPerCanvasUnit ?? this.metersPerCanvasUnit,
+      );
 
   Map<String, Object?> toJson() => {
         'id': id,
@@ -150,5 +170,6 @@ class TraceGeometry {
         'canvasPoints':
             canvasPoints.map((point) => {'x': point.x, 'y': point.y}).toList(),
         'closed': closed,
+        'metersPerCanvasUnit': metersPerCanvasUnit,
       };
 }

@@ -3,8 +3,19 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
-import '../models/trace_geometry.dart';
 import 'graph_export_legend.dart';
+
+class GraphPdfPhoto {
+  const GraphPdfPhoto({
+    required this.referenceLabel,
+    required this.filename,
+    required this.bytes,
+  });
+
+  final String referenceLabel;
+  final String filename;
+  final Uint8List bytes;
+}
 
 class GraphPdfExport {
   const GraphPdfExport._();
@@ -12,23 +23,14 @@ class GraphPdfExport {
   static Future<Uint8List> build({
     required Uint8List graphPng,
     required String title,
-    required MeasurementCalibration calibration,
     List<GraphLegendSection> legend = const [],
+    List<GraphPdfPhoto> photos = const [],
   }) async {
     final document = pw.Document(
       title: title,
       creator: 'BugMan Graphs',
     );
     final image = pw.MemoryImage(graphPng);
-    final accuracy = switch (calibration.status) {
-      MeasurementAccuracyStatus.verified => 'Verified',
-      MeasurementAccuracyStatus.estimated => 'Estimated',
-      MeasurementAccuracyStatus.uncalibrated => 'Uncalibrated',
-      MeasurementAccuracyStatus.outsideTolerance => 'Outside tolerance',
-      MeasurementAccuracyStatus.modifiedSinceVerification =>
-        'Modified since verification',
-    };
-
     document.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.letter.landscape,
@@ -36,18 +38,12 @@ class GraphPdfExport {
         build: (context) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text(
-                  title,
-                  style: const pw.TextStyle(
-                    fontSize: 16,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.Text('Measurement status: $accuracy'),
-              ],
+            pw.Text(
+              title,
+              style: const pw.TextStyle(
+                fontSize: 16,
+                fontWeight: pw.FontWeight.bold,
+              ),
             ),
             pw.SizedBox(height: 12),
             pw.Expanded(
@@ -102,6 +98,55 @@ class GraphPdfExport {
         ),
       ),
     );
+    for (var start = 0; start < photos.length; start += 2) {
+      final pagePhotos = photos.skip(start).take(2).toList(growable: false);
+      document.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.letter,
+          margin: const pw.EdgeInsets.all(32),
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                '$title - Photo Appendix',
+                style: const pw.TextStyle(
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 16),
+              for (final photo in pagePhotos)
+                pw.Expanded(
+                  child: pw.Padding(
+                    padding: const pw.EdgeInsets.only(bottom: 14),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          '${photo.referenceLabel}  ${photo.filename}',
+                          style: const pw.TextStyle(
+                            fontSize: 12,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                        pw.SizedBox(height: 8),
+                        pw.Expanded(
+                          child: pw.Center(
+                            child: pw.Image(
+                              pw.MemoryImage(photo.bytes),
+                              fit: pw.BoxFit.contain,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
     return document.save();
   }
 }

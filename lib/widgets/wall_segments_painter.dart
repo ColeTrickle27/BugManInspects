@@ -110,7 +110,7 @@ class WallSegmentsPainter extends CustomPainter {
         _drawEndpoint(canvas, segment.start, const Color(0xFF214D38));
         _drawEndpoint(canvas, segment.end, const Color(0xFF214D38));
       }
-      if (drawMeasurements) {
+      if (drawMeasurements && !segment.hasArrow) {
         _drawMeasurementLabel(canvas, segment);
       }
     }
@@ -124,7 +124,7 @@ class WallSegmentsPainter extends CustomPainter {
     final preview = previewSegment;
     if (preview != null) {
       _drawPreviewSegment(canvas, preview);
-      if (drawMeasurements) {
+      if (drawMeasurements && !preview.hasArrow) {
         _drawMeasurementLabel(canvas, preview);
       }
     }

@@ -52,4 +52,32 @@ void main() {
       [GraphMarkerType.baitStation],
     );
   });
+
+  test('legend omits sections whose layers are hidden', () {
+    const markers = [
+      GraphAnnotation(
+        kind: GraphAnnotationKind.marker,
+        point: GraphPoint(x: 1, y: 1),
+        label: '15% — Good',
+        markerType: GraphMarkerType.moisture,
+      ),
+      GraphAnnotation(
+        kind: GraphAnnotationKind.marker,
+        point: GraphPoint(x: 2, y: 2),
+        label: 'Bait Station',
+        markerType: GraphMarkerType.baitStation,
+      ),
+    ];
+
+    expect(
+      buildGraphLegend(markers, inspectionsVisible: false)
+          .map((section) => section.title),
+      ['Treatment Markers'],
+    );
+    expect(
+      buildGraphLegend(markers, treatmentVisible: false)
+          .map((section) => section.title),
+      ['Inspection Markers'],
+    );
+  });
 }

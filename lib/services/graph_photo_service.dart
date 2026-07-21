@@ -36,6 +36,7 @@ OptimizedGraphPhoto optimizeGraphPhoto({
   required PickedGraphPhoto source,
   required String annotationId,
   required String attachmentId,
+  String referenceLabel = '',
 }) {
   final decoded = image_lib.decodeImage(source.bytes);
   if (decoded == null) {
@@ -72,6 +73,7 @@ OptimizedGraphPhoto optimizeGraphPhoto({
       id: attachmentId,
       name: source.name,
       annotationId: annotationId,
+      referenceLabel: referenceLabel,
       mimeType: 'image/jpeg',
       byteSize: bytes.length,
       width: optimized.width,

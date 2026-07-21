@@ -43,13 +43,7 @@ class WallSegment {
 
   double get lengthFeet => lengthPixels / pixelsPerFoot;
 
-  String get measurementLabel {
-    if (lengthFeet < 10) {
-      return '${lengthFeet.toStringAsFixed(1)} lf';
-    }
-
-    return '${lengthFeet.round()} lf';
-  }
+  String get measurementLabel => '${lengthFeet.round()} lf';
 
   WallSegment copyWith({
     GraphPoint? start,

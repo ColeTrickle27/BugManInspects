@@ -109,14 +109,9 @@ class GraphAnnotationsPainter extends CustomPainter {
     canvas.translate(center.dx, center.dy);
     canvas.rotate(annotation.rotationDegrees * 3.1415926535 / 180);
     canvas.drawCircle(
-      const Offset(2, 3),
-      iconSize * 0.58,
-      Paint()..color = const Color.fromRGBO(0, 0, 0, 0.14),
-    );
-    canvas.drawCircle(
-      Offset.zero,
-      iconSize * 0.58,
-      Paint()..color = Colors.white,
+      const Offset(1.5, 2),
+      iconSize * 0.34,
+      Paint()..color = const Color.fromRGBO(0, 0, 0, 0.16),
     );
     final iconPainter = TextPainter(
       text: TextSpan(

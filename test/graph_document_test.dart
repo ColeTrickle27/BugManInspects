@@ -132,7 +132,7 @@ void main() {
       restored.measurementCalibration.status,
       MeasurementAccuracyStatus.verified,
     );
-    expect(restored.toJson()['schemaVersion'], 4);
+    expect(restored.toJson()['schemaVersion'], 5);
     expect(restored.isDirty, isFalse);
   });
 
@@ -165,7 +165,7 @@ void main() {
     expect(restored.customer.name, 'Legacy Customer');
     expect(restored.customer.pestPacLocationNumber, 'LEGACY-300');
     expect(restored.customer.pestPacBillToNumber, isEmpty);
-    expect(restored.wallSegments.single.measurementLabel, '1.0 lf');
+    expect(restored.wallSegments.single.measurementLabel, '1 lf');
     expect(restored.shapes.single.name, 'Legacy Main');
     expect(restored.shapes.single.extraProperties['legacyShapeField'], 42);
     expect(restored.toJson()['legacyVendorField'], 'keep-me');
@@ -173,6 +173,36 @@ void main() {
     expect(customerJson['pestPacLocationNumber'], 'LEGACY-300');
     expect(customerJson['pestPacBillToNumber'], '');
     expect(customerJson['pestPacAccountNumber'], 'LEGACY-300');
+  });
+
+  test('persists stable photo references and the next pin number', () {
+    final document = GraphDocument(
+      customer: GraphCustomerInfo.fromJob(job),
+      annotations: const [
+        GraphAnnotation(
+          id: 'pin-3',
+          kind: GraphAnnotationKind.photo,
+          point: GraphPoint(x: 20, y: 30),
+          label: '3',
+          attachmentIds: ['photo-3a'],
+        ),
+      ],
+      attachments: const [
+        GraphAttachment(
+          id: 'photo-3a',
+          name: 'inspection.jpg',
+          annotationId: 'pin-3',
+          referenceLabel: '3a',
+        ),
+      ],
+      metadata: const {'nextPhotoNumber': 4},
+    );
+
+    final restored = GraphDocument.fromJson(document.toJson());
+    expect(restored.attachments.single.referenceLabel, '3a');
+    expect(restored.nextPhotoNumber, 4);
+    expect(restored.reservePhotoNumber(), 4);
+    expect(restored.nextPhotoNumber, 5);
   });
 
   test('retains marker category and type in saved documents', () {

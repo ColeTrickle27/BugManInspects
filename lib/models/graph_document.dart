@@ -122,7 +122,7 @@ class GraphDocument extends ChangeNotifier {
     )..markClean();
   }
 
-  static const int schemaVersion = 4;
+  static const int schemaVersion = 5;
 
   static const Map<String, GraphLayerState> defaultLayers = {
     'structure': GraphLayerState(),
@@ -179,6 +179,30 @@ class GraphDocument extends ChangeNotifier {
 
   bool get isDirty => _isDirty;
   int get revision => _revision;
+
+  int get nextPhotoNumber {
+    final persisted = _metadata['nextPhotoNumber'];
+    if (persisted is num && persisted.toInt() > 0) {
+      return persisted.toInt();
+    }
+    var highest = 0;
+    for (final annotation in photos) {
+      final match = RegExp(r'\d+').firstMatch(annotation.label);
+      final value = int.tryParse(match?.group(0) ?? '');
+      if (value != null && value > highest) highest = value;
+    }
+    return highest + 1;
+  }
+
+  int reservePhotoNumber() {
+    final value = nextPhotoNumber;
+    _metadata = <String, Object?>{
+      ..._metadata,
+      'nextPhotoNumber': value + 1,
+    };
+    _changed();
+    return value;
+  }
 
   GraphLayerState layer(String id) => _layers[id] ?? const GraphLayerState();
 
@@ -344,6 +368,7 @@ class GraphAttachment {
     required this.id,
     required this.name,
     this.annotationId = '',
+    this.referenceLabel = '',
     this.mimeType = '',
     this.byteSize = 0,
     this.width = 0,
@@ -358,6 +383,7 @@ class GraphAttachment {
         id: _string(json['id']),
         name: _string(json['name']),
         annotationId: _string(json['annotationId']),
+        referenceLabel: _string(json['referenceLabel']),
         mimeType: _string(json['mimeType']),
         byteSize: (json['byteSize'] as num?)?.toInt() ?? 0,
         width: (json['width'] as num?)?.toInt() ?? 0,
@@ -374,6 +400,7 @@ class GraphAttachment {
   final String id;
   final String name;
   final String annotationId;
+  final String referenceLabel;
   final String mimeType;
   final int byteSize;
   final int width;
@@ -386,6 +413,7 @@ class GraphAttachment {
         'id': id,
         'name': name,
         'annotationId': annotationId,
+        'referenceLabel': referenceLabel,
         'mimeType': mimeType,
         'byteSize': byteSize,
         'width': width,

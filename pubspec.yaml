@@ -12,6 +12,7 @@ dependencies:
   pdf: ^3.13.0
   idb_shim: ^2.6.7
   image: ^4.2.0
+  google_maps_flutter: ^2.13.1
 
 dev_dependencies:
   flutter_test:

@@ -1,6 +1,8 @@
 import 'package:bugman_graphs/models/graph_point.dart';
 import 'package:bugman_graphs/models/trace_geometry.dart';
 import 'package:bugman_graphs/services/measurement_service.dart';
+import 'package:bugman_graphs/services/trace_projection_service.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -80,5 +82,28 @@ void main() {
     expect(result.linearMeters, closeTo(11.12, 0.05));
     expect(result.squareMeters, 0);
     expect(result.isUsableForBusinessCalculations, isTrue);
+  });
+
+  test('trace projection auto-fits uniformly and persists a usable scale', () {
+    const points = [
+      GeoPoint(latitude: 35, longitude: -86),
+      GeoPoint(latitude: 35, longitude: -85.9998),
+      GeoPoint(latitude: 35.0001, longitude: -85.9998),
+    ];
+    final projected = TraceProjectionService.projectToCanvas(
+      points,
+      canvasSize: const Size(3600, 2600),
+    );
+
+    expect(projected.canvasPoints, hasLength(3));
+    expect(projected.metersPerCanvasUnit, greaterThan(0));
+    expect(
+      TraceProjectionService.scaleBarFeet(projected.metersPerCanvasUnit),
+      greaterThan(0),
+    );
+    for (final point in projected.canvasPoints) {
+      expect(point.x, inInclusiveRange(0, 3600));
+      expect(point.y, inInclusiveRange(0, 2600));
+    }
   });
 }

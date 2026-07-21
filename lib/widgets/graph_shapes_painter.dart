@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/graph_shape.dart';
 import '../models/wall_segment.dart';
+import '../services/measurement_format.dart';
 import 'wall_segments_painter.dart';
 
 @visibleForTesting
@@ -26,13 +27,15 @@ String shapeMeasurementSummary(
     (total, segment) => total + segment.lengthFeet,
   );
   if (preset.showsLinearAndAreaMeasurements) {
-    return '${linearFeet.round()} lf • ${squareFeet.round()} sf';
+    return '${MeasurementFormat.linearFeet(linearFeet)} • '
+        '${MeasurementFormat.squareFeet(squareFeet)}';
   }
 
   if (preset.showsPropertyAreaMeasurements && shape.closed) {
     final acres = squareFeet / 43560;
-    return '${acres.toStringAsFixed(2)} ac • ${squareFeet.round()} sf • '
-        '${linearFeet.round()} lf';
+    return '${MeasurementFormat.acres(acres)} • '
+        '${MeasurementFormat.squareFeet(squareFeet)} • '
+        '${MeasurementFormat.linearFeet(linearFeet)}';
   }
 
   return '';
@@ -180,7 +183,13 @@ class GraphShapesPainter extends CustomPainter {
 
     canvas.drawPath(path, selectedPaint);
 
-    final handleCenters = shape.isStructure
+    final kind = shape.extraProperties['basicShapeKind']?.toString();
+    final legacyName = shape.name.toLowerCase();
+    final supportsVertices = kind != 'circle' &&
+        kind != 'ellipse' &&
+        !legacyName.startsWith('circle') &&
+        !legacyName.startsWith('ellipse');
+    final handleCenters = supportsVertices
         ? <Offset>{
             for (final segment in shapeSegments) segment.start.offset,
             for (final segment in shapeSegments) segment.end.offset,

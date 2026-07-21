@@ -28,16 +28,22 @@ class GraphLegendSection {
 List<GraphLegendSection> buildGraphLegend(
   Iterable<GraphAnnotation> annotations, {
   Iterable<GraphShape> shapes = const [],
+  bool inspectionsVisible = true,
+  bool treatmentVisible = true,
 }) {
   final placed = <GraphMarkerType, GraphAnnotation>{};
   for (final annotation in annotations) {
-    if (annotation.kind == GraphAnnotationKind.marker) {
+    if (annotation.kind == GraphAnnotationKind.marker &&
+        ((isTreatmentMarker(annotation.markerType) && treatmentVisible) ||
+            (!isTreatmentMarker(annotation.markerType) &&
+                inspectionsVisible))) {
       placed.putIfAbsent(annotation.markerType, () => annotation);
     }
   }
-  if (shapes.any(
-    (shape) => shape.preset == GraphDrawingPreset.treatmentArea,
-  )) {
+  if (treatmentVisible &&
+      shapes.any(
+        (shape) => shape.preset == GraphDrawingPreset.treatmentArea,
+      )) {
     placed.putIfAbsent(
       GraphMarkerType.treatmentArea,
       () => const GraphAnnotation(
@@ -81,7 +87,7 @@ List<GraphLegendSection> buildGraphLegend(
       .where(placed.containsKey)
       .map(entry)
       .toList(growable: false);
-  if (inspectionEntries.isNotEmpty) {
+  if (inspectionsVisible && inspectionEntries.isNotEmpty) {
     sections.add(
       GraphLegendSection(
         title: 'Inspection Markers',
@@ -89,7 +95,7 @@ List<GraphLegendSection> buildGraphLegend(
       ),
     );
   }
-  if (treatmentEntries.isNotEmpty) {
+  if (treatmentVisible && treatmentEntries.isNotEmpty) {
     sections.add(
       GraphLegendSection(
         title: 'Treatment Markers',

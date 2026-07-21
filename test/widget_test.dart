@@ -289,6 +289,32 @@ void main() {
     expect(after.first.end.y, before.first.end.y);
   });
 
+  testWidgets('dragging a rectangle vertex moves only its connected corners',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    await _selectBasicShape(tester, 'Rectangle');
+    await tester.dragFrom(const Offset(300, 250), const Offset(220, 170));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.pump();
+
+    final before = List.of(_graphOverlayPainter(tester).wallSegments as List);
+    final gesture = await tester.startGesture(const Offset(300, 250));
+    await gesture.moveTo(const Offset(336, 286));
+    await gesture.up();
+    await tester.pump();
+    final after = List.of(_graphOverlayPainter(tester).wallSegments as List);
+
+    expect(after.first.start, isNot(before.first.start));
+    expect(after.last.end.x, after.first.start.x);
+    expect(after.last.end.y, after.first.start.y);
+    expect(after.first.end.x, before.first.end.x);
+    expect(after.first.end.y, before.first.end.y);
+  });
+
   testWidgets('double-click completes an in-progress structure',
       (tester) async {
     tester.view.devicePixelRatio = 1;

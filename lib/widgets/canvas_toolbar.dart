@@ -292,21 +292,6 @@ class CanvasToolbar extends StatelessWidget {
                 selectedMarker: selectedMarkerType,
                 onSelected: _activate,
               ),
-              const SizedBox(height: 8),
-              for (final action in const [
-                CanvasToolbarAction.tool(CanvasTool.text),
-                CanvasToolbarAction.tool(CanvasTool.photo),
-              ]) ...[
-                _ActionButton(
-                  action: action,
-                  selectedTool: selectedTool,
-                  selectedPreset: selectedDrawingPreset,
-                  selectedMarker: selectedMarkerType,
-                  onPressed: _activate,
-                  onDoubleTap: () => onActionDoubleTapped(action),
-                ),
-                const SizedBox(height: 8),
-              ],
               const Divider(height: 22),
               const _ToolbarGroupLabel(label: 'Inspection Markers'),
               for (final marker in const [
@@ -322,6 +307,20 @@ class CanvasToolbar extends StatelessWidget {
                   onDoubleTap: () => onActionDoubleTapped(
                     CanvasToolbarAction.marker(marker),
                   ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              for (final action in const [
+                CanvasToolbarAction.tool(CanvasTool.text),
+                CanvasToolbarAction.tool(CanvasTool.photo),
+              ]) ...[
+                _ActionButton(
+                  action: action,
+                  selectedTool: selectedTool,
+                  selectedPreset: selectedDrawingPreset,
+                  selectedMarker: selectedMarkerType,
+                  onPressed: _activate,
+                  onDoubleTap: () => onActionDoubleTapped(action),
                 ),
                 const SizedBox(height: 8),
               ],

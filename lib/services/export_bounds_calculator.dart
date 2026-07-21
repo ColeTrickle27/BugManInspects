@@ -1,7 +1,10 @@
 import 'dart:ui';
 
 import '../models/graph_document.dart';
+import '../models/graph_annotation.dart';
+import '../models/graph_marker_catalog.dart';
 import '../models/graph_point.dart';
+import '../models/graph_shape.dart';
 
 class ExportBoundsCalculator {
   const ExportBoundsCalculator._();
@@ -10,16 +13,45 @@ class ExportBoundsCalculator {
     GraphDocument document, {
     double padding = 48,
     Size? canvasSize,
+    bool structureVisible = true,
+    bool shapesVisible = true,
+    bool inspectionsVisible = true,
+    bool treatmentVisible = true,
+    bool photosVisible = true,
+    bool traceVisible = true,
   }) {
+    final shapeSegmentIndexes = <int>{};
+    final visibleShapeSegmentIndexes = <int>{};
+    for (final shape in document.shapes) {
+      shapeSegmentIndexes.addAll(shape.segmentIndexes);
+      final visible = shape.preset == GraphDrawingPreset.treatmentArea
+          ? treatmentVisible
+          : shapesVisible;
+      if (visible) visibleShapeSegmentIndexes.addAll(shape.segmentIndexes);
+    }
     final points = <GraphPoint>[
-      for (final segment in document.wallSegments) ...[
-        segment.start,
-        segment.end,
-        if (segment.controlPoint != null) segment.controlPoint!,
-      ],
-      for (final annotation in document.annotations) annotation.point,
-      for (final stroke in document.freehandStrokes) ...stroke.points,
-      for (final trace in document.traces) ...trace.canvasPoints,
+      for (var index = 0; index < document.wallSegments.length; index += 1)
+        if ((shapeSegmentIndexes.contains(index)
+            ? visibleShapeSegmentIndexes.contains(index)
+            : structureVisible))
+          for (final segment in [document.wallSegments[index]]) ...[
+            segment.start,
+            segment.end,
+            if (segment.controlPoint != null) segment.controlPoint!,
+          ],
+      for (final annotation in document.annotations)
+        if (_annotationVisible(
+          annotation,
+          structureVisible: structureVisible,
+          inspectionsVisible: inspectionsVisible,
+          treatmentVisible: treatmentVisible,
+          photosVisible: photosVisible,
+        ))
+          annotation.point,
+      if (structureVisible)
+        for (final stroke in document.freehandStrokes) ...stroke.points,
+      if (traceVisible)
+        for (final trace in document.traces) ...trace.canvasPoints,
     ];
 
     if (points.isEmpty) {
@@ -52,4 +84,23 @@ class ExportBoundsCalculator {
     }
     return bounds;
   }
+
+  static bool _annotationVisible(
+    GraphAnnotation annotation, {
+    required bool structureVisible,
+    required bool inspectionsVisible,
+    required bool treatmentVisible,
+    required bool photosVisible,
+  }) =>
+      switch (annotation.kind) {
+        GraphAnnotationKind.photo => photosVisible,
+        GraphAnnotationKind.text => inspectionsVisible,
+        GraphAnnotationKind.marker
+            when utilityMarkerTypes.contains(annotation.markerType) =>
+          structureVisible,
+        GraphAnnotationKind.marker
+            when isTreatmentMarker(annotation.markerType) =>
+          treatmentVisible,
+        GraphAnnotationKind.marker => inspectionsVisible,
+      };
 }

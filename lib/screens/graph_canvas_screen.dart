@@ -13,11 +13,15 @@ import '../models/freehand_stroke.dart';
 import '../models/graph_point.dart';
 import '../models/graph_shape.dart';
 import '../models/job.dart';
+import '../models/trace_geometry.dart';
 import '../models/wall_segment.dart';
+import 'trace_workspace_screen.dart';
 import '../services/export_bounds_calculator.dart';
 import '../services/graph_export_legend.dart';
 import '../services/graph_image_export.dart';
+import '../services/measurement_format.dart';
 import '../services/graph_pdf_export.dart';
+import '../services/graph_photo_optimizer_factory.dart';
 import '../services/graph_photo_service.dart';
 import '../services/graph_photo_picker_factory.dart';
 import '../services/graph_repository.dart';
@@ -29,6 +33,7 @@ import '../widgets/graph_annotations_painter.dart';
 import '../widgets/graph_grid_painter.dart';
 import '../widgets/graph_shapes_painter.dart';
 import '../widgets/wall_segments_painter.dart';
+import '../widgets/trace_geometry_painter.dart';
 
 class GraphCanvasScreen extends StatefulWidget {
   const GraphCanvasScreen({
@@ -171,6 +176,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   List<FreehandStroke> get _freehandStrokes => _document.freehandStrokes;
   set _freehandStrokes(List<FreehandStroke> value) =>
       _document.replaceFreehandStrokes(value);
+
+  List<TraceGeometry> get _traces => _document.traces;
 
   bool get _traceLayerVisible => _document.layer('trace').visible;
 
@@ -561,7 +568,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       final selectedTarget = currentSelection == null
           ? null
           : _dragTargetForSelection(currentSelection, pointerPoint);
-      if (selectedTarget?.kind == _DragKind.shapeResize ||
+      if (selectedTarget?.kind == _DragKind.wallEndpoint ||
+          selectedTarget?.kind == _DragKind.shapeResize ||
           selectedTarget?.kind == _DragKind.shapeRotation) {
         _pointerDownHitSelection = currentSelection;
         _startDragForSelection(currentSelection!, pointerPoint);
@@ -1348,6 +1356,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       closed: true,
       rotationDegrees: 0,
       preset: _selectedDrawingPreset,
+      extraProperties: <String, Object?>{'basicShapeKind': _selectedTool.name},
     );
 
     setState(() {
@@ -1735,7 +1744,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           isArrow ? null : _activePathStartSegmentIndex;
       _undoStack.add(const _UndoEntry(_UndoKind.wallSegment));
       _canvasStatus =
-          '${isArrow ? 'Arrow' : 'Line'} added: ${segment.measurementLabel}';
+          isArrow ? 'Arrow added' : 'Line added: ${segment.measurementLabel}';
     });
   }
 
@@ -1781,7 +1790,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _activePathStartPoint = null;
       _activePathStartSegmentIndex = null;
       _undoStack.add(const _UndoEntry(_UndoKind.wallSegment));
-      _canvasStatus = 'Arrow added: ${segment.measurementLabel}';
+      _canvasStatus = 'Arrow added';
     });
   }
 
@@ -2283,14 +2292,15 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           annotationIndex: selection.index,
           distance: _annotations[selection.index].point.distanceTo(point),
         ),
-      _SelectionKind.shape => _nearestShapeVertexTarget(point) ??
-          _nearestShapeResizeTarget(point) ??
-          _nearestShapeRotationTarget(point) ??
-          _DragTarget.shape(
-            shapeIndex: selection.index,
-            distance: 0,
-            originalPoint: point,
-          ),
+      _SelectionKind.shape =>
+        _nearestShapeVertexTarget(selection.index, point) ??
+            _nearestShapeResizeTarget(selection.index, point) ??
+            _nearestShapeRotationTarget(selection.index, point) ??
+            _DragTarget.shape(
+              shapeIndex: selection.index,
+              distance: 0,
+              originalPoint: point,
+            ),
       _SelectionKind.freehand => _DragTarget.freehand(
           freehandIndex: selection.index,
           distance: 0,
@@ -2305,15 +2315,15 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     };
   }
 
-  _DragTarget? _nearestShapeVertexTarget(GraphPoint point) {
-    final selectedShapeIndex = _selection?.shapeIndex;
-    if (selectedShapeIndex == null ||
-        selectedShapeIndex < 0 ||
-        selectedShapeIndex >= _shapes.length) {
+  _DragTarget? _nearestShapeVertexTarget(
+    int selectedShapeIndex,
+    GraphPoint point,
+  ) {
+    if (selectedShapeIndex < 0 || selectedShapeIndex >= _shapes.length) {
       return null;
     }
     final shape = _shapes[selectedShapeIndex];
-    if (!shape.isStructure || !_shapeCanBeEdited(shape)) {
+    if (!_shapeSupportsVertexEditing(shape) || !_shapeCanBeEdited(shape)) {
       return null;
     }
 
@@ -2354,11 +2364,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     );
   }
 
-  _DragTarget? _nearestShapeResizeTarget(GraphPoint point) {
-    final selectedShapeIndex = _selection?.shapeIndex;
-    if (selectedShapeIndex == null ||
-        selectedShapeIndex < 0 ||
-        selectedShapeIndex >= _shapes.length) {
+  _DragTarget? _nearestShapeResizeTarget(
+    int selectedShapeIndex,
+    GraphPoint point,
+  ) {
+    if (selectedShapeIndex < 0 || selectedShapeIndex >= _shapes.length) {
       return null;
     }
     if (!_shapeCanBeEdited(_shapes[selectedShapeIndex])) return null;
@@ -2391,11 +2401,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     return null;
   }
 
-  _DragTarget? _nearestShapeRotationTarget(GraphPoint point) {
-    final selectedShapeIndex = _selection?.shapeIndex;
-    if (selectedShapeIndex == null ||
-        selectedShapeIndex < 0 ||
-        selectedShapeIndex >= _shapes.length) {
+  _DragTarget? _nearestShapeRotationTarget(
+    int selectedShapeIndex,
+    GraphPoint point,
+  ) {
+    if (selectedShapeIndex < 0 || selectedShapeIndex >= _shapes.length) {
       return null;
     }
     if (!_shapeCanBeEdited(_shapes[selectedShapeIndex])) return null;
@@ -2433,6 +2443,16 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _isLayerVisible(_GraphLayer.shapes) &&
         !_isLayerLocked(_GraphLayer.structure) &&
         !_isLayerLocked(_GraphLayer.shapes);
+  }
+
+  bool _shapeSupportsVertexEditing(GraphShape shape) {
+    final kind = shape.extraProperties['basicShapeKind']?.toString();
+    if (kind == CanvasTool.circle.name || kind == CanvasTool.ellipse.name) {
+      return false;
+    }
+    final legacyName = shape.name.toLowerCase();
+    return !legacyName.startsWith('circle') &&
+        !legacyName.startsWith('ellipse');
   }
 
   _DragTarget? _nearestEndpointTarget(GraphPoint point) {
@@ -2926,7 +2946,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         annotation.markerType == GraphMarkerType.moisture) {
       final moisture = await _showTextLabelDialog(
         title: 'Moisture percentage',
-        initialText: '20%',
+        initialText: '15%',
       );
       if (!mounted || moisture == null) {
         return;
@@ -2936,9 +2956,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _showCanvasMessage('Enter a valid moisture percentage');
         return;
       }
-      final formatted = value == value.roundToDouble()
-          ? '${value.round()}%'
-          : '${value.toStringAsFixed(1)}%';
+      final condition = value >= 20
+          ? 'Immediate action Req.'
+          : value >= 10 && value <= 15
+              ? 'Good'
+              : 'Caution';
+      final formatted = '${value.round()}% — $condition';
       annotation = annotation.copyWith(
         label: formatted,
         note: formatted,
@@ -4163,6 +4186,79 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     });
   }
 
+  Future<void> _openTraceWorkspace() async {
+    if (_isLayerLocked(_GraphLayer.trace)) {
+      _showCanvasMessage('Trace layer is locked');
+      return;
+    }
+    int? editIndex;
+    if (_traces.isNotEmpty) {
+      editIndex = await showModalBottomSheet<int>(
+        context: context,
+        showDragHandle: true,
+        builder: (context) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                title: Text('Satellite traces'),
+                subtitle: Text('Create a trace or edit an existing outline.'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.add),
+                title: const Text('New Trace'),
+                onTap: () => Navigator.pop(context, -1),
+              ),
+              for (var index = 0; index < _traces.length; index += 1)
+                ListTile(
+                  leading: const Icon(Icons.edit_location_alt_outlined),
+                  title: Text(_traces[index].label),
+                  onTap: () => Navigator.pop(context, index),
+                ),
+            ],
+          ),
+        ),
+      );
+      if (!mounted || editIndex == null) return;
+      if (editIndex == -1) editIndex = null;
+    }
+    final initialTrace = editIndex == null ? null : _traces[editIndex];
+    final trace = await Navigator.push<TraceGeometry>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TraceWorkspaceScreen(
+          address: _document.customer.serviceAddress,
+          canvasSize: _canvasSize,
+          traceLabel: 'Property Trace ${_traces.length + 1}',
+          initialTrace: initialTrace,
+        ),
+      ),
+    );
+    if (!mounted || trace == null) return;
+    _recordSnapshotUndo();
+    setState(() {
+      final nextTraces = <TraceGeometry>[..._traces];
+      if (editIndex == null) {
+        nextTraces.add(trace);
+      } else {
+        nextTraces[editIndex] = trace;
+      }
+      _document.replaceTraces(nextTraces);
+      _setLayerSettings(
+        _GraphLayer.trace,
+        const _LayerSettings(visible: true),
+      );
+      _document.setMeasurementCalibration(
+        const MeasurementCalibration(
+          source: MeasurementSource.mapGeodesic,
+          status: MeasurementAccuracyStatus.estimated,
+          note: 'Measurements derived from geographic trace points',
+        ),
+      );
+      _canvasStatus = 'Satellite trace added at real-world scale';
+    });
+  }
+
   void _toggleLayerVisibility(_GraphLayer layer) {
     if (layer == _GraphLayer.trace) {
       _toggleTraceLayer();
@@ -4302,15 +4398,19 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       if (!mounted || picked.isEmpty) return;
 
       final annotationId = newGraphId();
+      final photoNumber = _document.nextPhotoNumber;
       final optimized = <OptimizedGraphPhoto>[];
-      for (final photo in picked) {
+      for (var index = 0; index < picked.length; index += 1) {
+        final photo = picked[index];
+        setState(() {
+          _canvasStatus = 'Optimizing photo ${index + 1} of ${picked.length}…';
+        });
         optimized.add(
-          await Future(
-            () => optimizeGraphPhoto(
-              source: photo,
-              annotationId: annotationId,
-              attachmentId: newGraphId(),
-            ),
+          await optimizeGraphPhotoAsync(
+            source: photo,
+            annotationId: annotationId,
+            attachmentId: newGraphId(),
+            referenceLabel: '$photoNumber${_photoLetter(index)}',
           ),
         );
       }
@@ -4356,12 +4456,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       );
       if (!mounted || confirmed != true) return;
 
+      _document.reservePhotoNumber();
       final attachments = optimized.map((item) => item.attachment).toList();
       final annotation = GraphAnnotation(
         id: annotationId,
         kind: GraphAnnotationKind.photo,
         point: point,
-        label: optimized.length == 1 ? 'Photo' : '${optimized.length} Photos',
+        label: '$photoNumber',
         markerType: GraphMarkerType.camera,
         attachmentIds: attachments.map((item) => item.id).toList(),
       );
@@ -4375,7 +4476,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
               photo.thumbnailBytes;
         }
         _undoStack.add(const _UndoEntry(_UndoKind.annotation));
-        _canvasStatus = '${optimized.length} photo(s) added';
+        _canvasStatus =
+            '${optimized.length} photo(s) added at pin $photoNumber';
       });
     } catch (error) {
       if (mounted) _showCanvasMessage('Photos could not be added: $error');
@@ -4439,9 +4541,24 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          photo.attachment.name,
-                          style: Theme.of(context).textTheme.titleSmall,
+                        Row(
+                          children: [
+                            Text(
+                              photo.attachment.referenceLabel,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                photo.attachment.name,
+                                style: Theme.of(context).textTheme.titleSmall,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 8),
                         if (photo.bytes case final bytes?)
@@ -4472,6 +4589,17 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         ),
       ),
     );
+  }
+
+  String _photoLetter(int index) {
+    var value = index + 1;
+    final letters = <int>[];
+    while (value > 0) {
+      value -= 1;
+      letters.add(97 + (value % 26));
+      value ~/= 26;
+    }
+    return String.fromCharCodes(letters.reversed);
   }
 
   void _togglePropertiesCollapsed() {
@@ -4618,8 +4746,20 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       final bounds = ExportBoundsCalculator.forDocument(
         _document,
         canvasSize: _canvasSize,
+        structureVisible: _isLayerVisible(_GraphLayer.structure),
+        shapesVisible: _isLayerVisible(_GraphLayer.structure) &&
+            _isLayerVisible(_GraphLayer.shapes),
+        inspectionsVisible: _isLayerVisible(_GraphLayer.inspections),
+        treatmentVisible: _isLayerVisible(_GraphLayer.treatment),
+        photosVisible: _isLayerVisible(_GraphLayer.photos),
+        traceVisible: _traceLayerVisible,
       );
-      final legend = buildGraphLegend(_annotations, shapes: _shapes);
+      final legend = buildGraphLegend(
+        _annotations,
+        shapes: _shapes,
+        inspectionsVisible: _isLayerVisible(_GraphLayer.inspections),
+        treatmentVisible: _isLayerVisible(_GraphLayer.treatment),
+      );
       final pngBytes = await GraphImageExport.capturePng(
         boundary,
         bounds,
@@ -4638,8 +4778,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
             await GraphPdfExport.build(
               graphPng: pngBytes,
               title: _document.customer.displayName,
-              calibration: _document.measurementCalibration,
               legend: legend,
+              photos: _isLayerVisible(_GraphLayer.photos)
+                  ? await _buildPdfPhotos()
+                  : const [],
             ),
             '$baseName-graph.pdf',
             'application/pdf',
@@ -4653,6 +4795,30 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     } catch (error) {
       _showCanvasMessage('Graph export failed: $error');
     }
+  }
+
+  Future<List<GraphPdfPhoto>> _buildPdfPhotos() async {
+    final result = <GraphPdfPhoto>[];
+    final visiblePhotoIds = _annotations
+        .where((item) => item.kind == GraphAnnotationKind.photo)
+        .expand((item) => item.attachmentIds)
+        .toSet();
+    for (final attachment in _document.attachments) {
+      if (!visiblePhotoIds.contains(attachment.id)) continue;
+      final bytes = _pendingPhotoBlobs[attachment.blobKey] ??
+          await _repository.loadBlob(attachment.blobKey);
+      if (bytes == null) continue;
+      result.add(
+        GraphPdfPhoto(
+          referenceLabel: attachment.referenceLabel.isEmpty
+              ? 'Photo'
+              : attachment.referenceLabel,
+          filename: attachment.name,
+          bytes: bytes,
+        ),
+      );
+    }
+    return result;
   }
 
   void _zoomBy(double factor) {
@@ -5386,6 +5552,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                                     annotations: _annotations,
                                     shapes: _shapes,
                                     freehandStrokes: _freehandStrokes,
+                                    traces: _traces,
                                     draftFreehandPoints: _draftFreehandPoints,
                                     previewShapeSegments: _previewShapeSegments,
                                     previewShape: _previewShape,
@@ -5442,7 +5609,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onMarkerSelected: _selectMarker,
                           onDrawingPresetSelected: _selectDrawingPreset,
                           traceLayerVisible: _traceLayerVisible,
-                          onToggleTraceLayer: _toggleTraceLayer,
+                          onToggleTraceLayer: () => _openTraceWorkspace(),
                           onCollapse: () => setState(
                             () => _mainToolbarCollapsed = true,
                           ),
@@ -6427,8 +6594,10 @@ class _PropertiesSidebar extends StatelessWidget {
             onPressed: structureLocked ? null : () => onSetLineDefault(index),
             child: const Text('Set as Default'),
           ),
-          const SizedBox(height: 8),
-          _InspectorValue(label: 'Length', value: segment.measurementLabel),
+          if (!segment.hasArrow) ...[
+            const SizedBox(height: 8),
+            _InspectorValue(label: 'Length', value: segment.measurementLabel),
+          ],
           const SizedBox(height: 8),
           _InspectorValue(
             label: 'Start',
@@ -6556,12 +6725,18 @@ class _PropertiesSidebar extends StatelessWidget {
           const SizedBox(height: 10),
           _InspectorValue(
             label: 'Linear ft',
-            value: _shapeLinearFeet(shape).toStringAsFixed(1),
+            value: MeasurementFormat.linearFeet(
+              _shapeLinearFeet(shape),
+              includeUnit: false,
+            ),
           ),
           const SizedBox(height: 8),
           _InspectorValue(
             label: 'Square ft',
-            value: _shapeSquareFeet(shape).toStringAsFixed(1),
+            value: MeasurementFormat.squareFeet(
+              _shapeSquareFeet(shape),
+              includeUnit: false,
+            ),
           ),
         ],
       );
@@ -6960,7 +7135,8 @@ class _LayersPanel extends StatelessWidget {
                 _LayerRow(
                   icon: Icons.layers_outlined,
                   name: 'Trace Layer',
-                  detail: 'satellite placeholder',
+                  detail:
+                      traceLayerVisible ? 'address trace visible' : 'hidden',
                   visible: traceLayerVisible,
                   locked: _isLocked(_GraphLayer.trace),
                   onToggleVisibility: () =>
@@ -7071,6 +7247,7 @@ class _CanvasSurface extends StatelessWidget {
     required this.annotations,
     required this.shapes,
     required this.freehandStrokes,
+    required this.traces,
     required this.draftFreehandPoints,
     required this.previewShapeSegments,
     required this.previewShape,
@@ -7099,6 +7276,7 @@ class _CanvasSurface extends StatelessWidget {
   final List<GraphAnnotation> annotations;
   final List<GraphShape> shapes;
   final List<FreehandStroke> freehandStrokes;
+  final List<TraceGeometry> traces;
   final List<GraphPoint> draftFreehandPoints;
   final List<WallSegment> previewShapeSegments;
   final GraphShape? previewShape;
@@ -7155,7 +7333,7 @@ class _CanvasSurface extends StatelessWidget {
       child: SizedBox(
         width: canvasSize.width,
         height: canvasSize.height,
-        child: traceLayerVisible ? const _TraceLayer() : null,
+        child: traceLayerVisible ? _TraceLayer(traces: traces) : null,
       ),
     );
   }
@@ -7292,28 +7470,16 @@ class _GraphOverlayPainter extends CustomPainter {
 }
 
 class _TraceLayer extends StatelessWidget {
-  const _TraceLayer();
+  const _TraceLayer({required this.traces});
+
+  final List<TraceGeometry> traces;
 
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
-      child: Container(
-        margin: const EdgeInsets.all(28),
-        decoration: BoxDecoration(
-          color: const Color.fromRGBO(89, 123, 153, 0.16),
-          border: Border.all(
-            color: const Color.fromRGBO(89, 123, 153, 0.35),
-            width: 2,
-          ),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          'Satellite trace layer placeholder',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: const Color(0xFF35566E),
-                fontWeight: FontWeight.w700,
-              ),
-        ),
+      child: CustomPaint(
+        size: const Size(double.infinity, double.infinity),
+        painter: TraceGeometryPainter(traces: traces),
       ),
     );
   }
@@ -7528,6 +7694,8 @@ class _EditorSnapshot {
     required this.annotations,
     required this.shapes,
     required this.freehandStrokes,
+    required this.traces,
+    required this.measurementCalibration,
     required this.activeWallStart,
     required this.activePathStartPoint,
     required this.pendingCurveControlPoint,
@@ -7540,6 +7708,8 @@ class _EditorSnapshot {
         annotations: List<GraphAnnotation>.of(state._annotations),
         shapes: List<GraphShape>.of(state._shapes),
         freehandStrokes: List<FreehandStroke>.of(state._freehandStrokes),
+        traces: List<TraceGeometry>.of(state._traces),
+        measurementCalibration: state._document.measurementCalibration,
         activeWallStart: state._activeWallStart,
         activePathStartPoint: state._activePathStartPoint,
         pendingCurveControlPoint: state._pendingCurveControlPoint,
@@ -7550,6 +7720,8 @@ class _EditorSnapshot {
   final List<GraphAnnotation> annotations;
   final List<GraphShape> shapes;
   final List<FreehandStroke> freehandStrokes;
+  final List<TraceGeometry> traces;
+  final MeasurementCalibration measurementCalibration;
   final GraphPoint? activeWallStart;
   final GraphPoint? activePathStartPoint;
   final GraphPoint? pendingCurveControlPoint;
@@ -7560,6 +7732,8 @@ class _EditorSnapshot {
     state._annotations = annotations;
     state._shapes = shapes;
     state._freehandStrokes = freehandStrokes;
+    state._document.replaceTraces(traces);
+    state._document.setMeasurementCalibration(measurementCalibration);
     state._activeWallStart = activeWallStart;
     state._activePathStartPoint = activePathStartPoint;
     state._pendingCurveControlPoint = pendingCurveControlPoint;

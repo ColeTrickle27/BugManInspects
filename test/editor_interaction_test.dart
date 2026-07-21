@@ -188,9 +188,9 @@ void main() {
     expect(shapeMeasurementSummary(structure, segments), '4 lf • 1 sf');
     expect(
       shapeMeasurementSummary(property, segments),
-      '0.00 ac • 1 sf • 4 lf',
+      '0.0 ac • 1 sf • 4 lf',
     );
-    expect(segments.first.measurementLabel, '1.0 lf');
+    expect(segments.first.measurementLabel, '1 lf');
   });
 
   test('completed fence uses its saved X-mark segment styling', () {

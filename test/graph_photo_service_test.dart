@@ -16,9 +16,11 @@ void main() {
       source: source,
       annotationId: 'pin-1',
       attachmentId: 'photo-1',
+      referenceLabel: '1a',
     );
 
     expect(optimized.attachment.annotationId, 'pin-1');
+    expect(optimized.attachment.referenceLabel, '1a');
     expect(optimized.attachment.mimeType, 'image/jpeg');
     expect(optimized.attachment.width, 2048);
     expect(optimized.attachment.height, 1024);
