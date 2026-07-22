@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:bugman_graphs/main.dart';
 import 'package:bugman_graphs/editor/editor_interaction_controller.dart';
+import 'package:bugman_graphs/models/graph_annotation.dart';
 import 'package:bugman_graphs/models/graph_shape.dart';
 import 'package:bugman_graphs/models/graph_document.dart';
 import 'package:bugman_graphs/models/job.dart';
@@ -577,6 +578,38 @@ void main() {
     await tester.tapAt(const Offset(410, 335));
     await tester.pump();
     expect(find.text('Item Properties'), findsOneWidget);
+  });
+
+  testWidgets('moisture marker saves a reading without a framework assertion',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    final moistureTool = find.byTooltip(
+      'Moisture\nHold and drag to customize quick tools',
+    );
+    await tester.ensureVisible(moistureTool);
+    await tester.pumpAndSettle();
+    await tester.tap(moistureTool.hitTestable());
+    await tester.pump(const Duration(milliseconds: 400));
+    final toolbar = tester.widget<CanvasToolbar>(find.byType(CanvasToolbar));
+    expect(toolbar.selectedTool, CanvasTool.marker);
+    expect(toolbar.selectedMarkerType, GraphMarkerType.moisture);
+    await tester.tapAt(const Offset(500, 350));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Moisture percentage'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '18%');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(_annotationCount(tester), 1);
+    final annotations =
+        _graphOverlayPainter(tester).annotations as List<dynamic>;
+    expect(annotations.single.label, '18% — Caution');
   });
 
   testWidgets('photo tool adds multiple selected images to one pin',

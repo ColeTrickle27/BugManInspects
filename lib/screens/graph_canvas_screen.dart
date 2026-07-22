@@ -3092,42 +3092,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     required String title,
     required String initialText,
   }) async {
-    final controller = TextEditingController(text: initialText);
-
     final text = await showDialog<String>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(title),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Label',
-              border: OutlineInputBorder(),
-            ),
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) {
-              Navigator.of(context).pop(controller.text.trim());
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(context).pop(controller.text.trim());
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+      builder: (context) => _TextLabelDialog(
+        title: title,
+        initialText: initialText,
+      ),
     );
-
-    controller.dispose();
 
     if (text == null || text.isEmpty) {
       return null;
@@ -7966,6 +7937,66 @@ class _SegmentEndpointRef {
 
   final int segmentIndex;
   final bool isStart;
+}
+
+class _TextLabelDialog extends StatefulWidget {
+  const _TextLabelDialog({
+    required this.title,
+    required this.initialText,
+  });
+
+  final String title;
+  final String initialText;
+
+  @override
+  State<_TextLabelDialog> createState() => _TextLabelDialogState();
+}
+
+class _TextLabelDialogState extends State<_TextLabelDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    Navigator.of(context).pop(_controller.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(
+          labelText: 'Label',
+          border: OutlineInputBorder(),
+        ),
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _save(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _save,
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
 }
 
 class _FinishShapeResult {
