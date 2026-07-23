@@ -87,4 +87,25 @@ class TraceProjectionService {
             : 1;
     return (nice * power).toDouble();
   }
+
+  static GeoPoint moveGeoPointByCanvasDelta({
+    required GeoPoint point,
+    required Offset canvasDelta,
+    required double metersPerCanvasUnit,
+  }) {
+    final northMeters = -canvasDelta.dy * metersPerCanvasUnit;
+    final eastMeters = canvasDelta.dx * metersPerCanvasUnit;
+    final latitudeRadians = point.latitude * math.pi / 180;
+    final latitudeDelta =
+        northMeters / MeasurementService.earthRadiusMeters * 180 / math.pi;
+    final longitudeScale = math.max(math.cos(latitudeRadians).abs(), 0.000001);
+    final longitudeDelta = eastMeters /
+        (MeasurementService.earthRadiusMeters * longitudeScale) *
+        180 /
+        math.pi;
+    return GeoPoint(
+      latitude: point.latitude + latitudeDelta,
+      longitude: point.longitude + longitudeDelta,
+    );
+  }
 }

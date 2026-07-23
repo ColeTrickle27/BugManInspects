@@ -26,6 +26,7 @@ import '../services/graph_photo_service.dart';
 import '../services/graph_photo_picker_factory.dart';
 import '../services/graph_repository.dart';
 import '../services/graph_repository_stub.dart';
+import '../services/trace_projection_service.dart';
 import '../widgets/canvas_toolbar.dart';
 import '../widgets/freehand_strokes_painter.dart';
 import '../widgets/graph_export_downloader.dart';
@@ -69,6 +70,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   final FocusNode _editorFocusNode = FocusNode(debugLabel: 'Graph editor');
   bool _multiTouchPanning = false;
   final GlobalKey _canvasBoundaryKey = GlobalKey(debugLabel: 'Graph export');
+  final GlobalKey _canvasViewportKey = GlobalKey(debugLabel: 'Graph viewport');
   final TransformationController _transformationController =
       TransformationController();
   late final GraphDocument _document;
@@ -115,6 +117,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   List<GraphAnnotation>? _dragOriginalAnnotations;
   List<GraphShape>? _dragOriginalShapes;
   List<FreehandStroke>? _dragOriginalFreehandStrokes;
+  List<TraceGeometry>? _dragOriginalTraces;
   GraphPoint? _dragOriginalActiveWallStart;
   GraphPoint? _dragOriginalActivePathStartPoint;
   int? _dragOriginalActivePathStartSegmentIndex;
@@ -569,6 +572,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           ? null
           : _dragTargetForSelection(currentSelection, pointerPoint);
       if (selectedTarget?.kind == _DragKind.wallEndpoint ||
+          selectedTarget?.kind == _DragKind.traceVertex ||
           selectedTarget?.kind == _DragKind.shapeResize ||
           selectedTarget?.kind == _DragKind.shapeRotation) {
         _pointerDownHitSelection = currentSelection;
@@ -719,6 +723,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
             return;
           }
         }
+        if (hitSelection.kind == _SelectionKind.trace) {
+          _openTraceWorkspace(editIndex: hitSelection.index);
+          _resetPointerGesture();
+          _rememberTap(sceneOffset);
+          return;
+        }
         if (_selectionOpensPropertiesOnDoubleClick(hitSelection)) {
           setState(() {
             _sidePanelMode = _SidePanelMode.properties;
@@ -829,6 +839,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _dragOriginalAnnotations = null;
     _dragOriginalShapes = null;
     _dragOriginalFreehandStrokes = null;
+    _dragOriginalTraces = null;
     _dragOriginalActiveWallStart = null;
     _dragOriginalActivePathStartPoint = null;
     _dragOriginalActivePathStartSegmentIndex = null;
@@ -885,7 +896,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   bool _selectionOpensPropertiesOnDoubleClick(_Selection selection) {
     if (selection.kind == _SelectionKind.shape ||
         selection.kind == _SelectionKind.segment ||
-        selection.kind == _SelectionKind.freehand) {
+        selection.kind == _SelectionKind.freehand ||
+        selection.kind == _SelectionKind.trace) {
       return true;
     }
     if (selection.kind != _SelectionKind.annotation) {
@@ -1009,7 +1021,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   void _zoomAt(Offset viewportPoint, double factor) {
     final currentScale = _transformationController.value.getMaxScaleOnAxis();
-    final nextScale = (currentScale * factor).clamp(0.25, 4.0);
+    final nextScale = (currentScale * factor).clamp(0.25, 10.0);
     final scenePoint = _transformationController.toScene(viewportPoint);
     final next = Matrix4.identity();
     next.setEntry(0, 0, nextScale);
@@ -1036,6 +1048,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _initialCanvasCentered = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      if (_traceLayerVisible && _traces.isNotEmpty) {
+        _fitTraceInViewport(_traces.last, viewportSize: viewportSize);
+        return;
+      }
       final centered = Matrix4.identity();
       centered.setEntry(0, 3, (viewportSize.width - _canvasSize.width) / 2);
       centered.setEntry(1, 3, (viewportSize.height - _canvasSize.height) / 2);
@@ -1085,6 +1101,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           ? _GraphLayer.treatment
           : _GraphLayer.structure,
       _SelectionKind.freehand => _GraphLayer.structure,
+      _SelectionKind.trace => _GraphLayer.trace,
     };
   }
 
@@ -1100,6 +1117,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       }
       return !_isLayerLocked(_GraphLayer.shapes) &&
           !_isLayerLocked(_GraphLayer.structure);
+    }
+
+    if (selection.kind == _SelectionKind.trace &&
+        (selection.index < 0 || selection.index >= _traces.length)) {
+      return false;
     }
 
     return !_isLayerLocked(_layerForSelection(selection));
@@ -2049,6 +2071,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _SelectionKind.shape => '${_shapes[selection.index].name} selected',
         _SelectionKind.freehand => 'Freehand stroke selected',
         _SelectionKind.segment => 'Line or arrow selected',
+        _SelectionKind.trace => '${_traces[selection.index].label} selected',
       };
 
   EditorObjectReference _interactionReference(_Selection selection) =>
@@ -2058,6 +2081,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           _SelectionKind.shape => EditorObjectKind.shape,
           _SelectionKind.freehand => EditorObjectKind.freehand,
           _SelectionKind.segment => EditorObjectKind.segment,
+          _SelectionKind.trace => EditorObjectKind.trace,
         },
         selection.index,
       );
@@ -2066,6 +2090,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     final annotationIndex = _nearestAnnotationIndex(point);
     if (annotationIndex != null) {
       return _Selection.annotation(annotationIndex);
+    }
+
+    final traceIndex = _traceIndexAt(point);
+    if (traceIndex != null) {
+      return _Selection.trace(traceIndex);
     }
 
     final shapeIndex = _shapeIndexAt(point);
@@ -2080,6 +2109,38 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     final segmentIndex = _nearestSegmentIndex(point);
     return segmentIndex == null ? null : _Selection.segment(segmentIndex);
+  }
+
+  int? _traceIndexAt(GraphPoint point) {
+    if (!_traceLayerVisible) return null;
+    for (var i = _traces.length - 1; i >= 0; i -= 1) {
+      final trace = _traces[i];
+      if (trace.canvasPoints.isEmpty) continue;
+      for (final vertex in trace.canvasPoints) {
+        if (vertex.distanceTo(point) <= _handleHitDistance) return i;
+      }
+      for (var p = 1; p < trace.canvasPoints.length; p += 1) {
+        if (_distanceToLinePoints(
+              point,
+              trace.canvasPoints[p - 1],
+              trace.canvasPoints[p],
+            ) <=
+            _objectHitDistance) {
+          return i;
+        }
+      }
+      if (trace.closed && trace.canvasPoints.length > 2) {
+        if (_distanceToLinePoints(
+              point,
+              trace.canvasPoints.last,
+              trace.canvasPoints.first,
+            ) <=
+            _objectHitDistance) {
+          return i;
+        }
+      }
+    }
+    return null;
   }
 
   int? _nearestAnnotationIndex(GraphPoint point) {
@@ -2272,6 +2333,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _dragOriginalAnnotations = <GraphAnnotation>[..._annotations];
     _dragOriginalShapes = <GraphShape>[..._shapes];
     _dragOriginalFreehandStrokes = <FreehandStroke>[..._freehandStrokes];
+    _dragOriginalTraces = <TraceGeometry>[..._traces];
     _dragOriginalActiveWallStart = _activeWallStart;
     _dragOriginalActivePathStartPoint = _activePathStartPoint;
     _dragOriginalActivePathStartSegmentIndex = _activePathStartSegmentIndex;
@@ -2312,7 +2374,32 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
             distance: _distanceToSegment(point, _wallSegments[selection.index]),
             originalPoint: point,
           ),
+      _SelectionKind.trace => _nearestTraceVertexTarget(
+          selection.index,
+          point,
+        ),
     };
+  }
+
+  _DragTarget? _nearestTraceVertexTarget(int traceIndex, GraphPoint point) {
+    if (traceIndex < 0 || traceIndex >= _traces.length) return null;
+    final trace = _traces[traceIndex];
+    var nearestDistance = _handleHitDistance;
+    int? nearestVertexIndex;
+    for (var i = 0; i < trace.canvasPoints.length; i += 1) {
+      final distance = trace.canvasPoints[i].distanceTo(point);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestVertexIndex = i;
+      }
+    }
+    if (nearestVertexIndex == null) return null;
+    return _DragTarget.traceVertex(
+      traceIndex: traceIndex,
+      traceVertexIndex: nearestVertexIndex,
+      originalPoint: trace.canvasPoints[nearestVertexIndex],
+      distance: nearestDistance,
+    );
   }
 
   _DragTarget? _nearestShapeVertexTarget(
@@ -2560,7 +2647,51 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       case _DragKind.segment:
         _moveSegment(target, point);
         return;
+      case _DragKind.traceVertex:
+        _moveTraceVertex(target, point);
+        return;
     }
+  }
+
+  void _moveTraceVertex(_DragTarget target, GraphPoint point) {
+    final traceIndex = target.traceIndex;
+    final vertexIndex = target.traceVertexIndex;
+    final originalPoint = target.originalPoint;
+    final sourceTraces = _dragOriginalTraces ?? _traces;
+    if (traceIndex == null ||
+        vertexIndex == null ||
+        originalPoint == null ||
+        traceIndex < 0 ||
+        traceIndex >= sourceTraces.length) {
+      return;
+    }
+    final sourceTrace = sourceTraces[traceIndex];
+    if (vertexIndex < 0 ||
+        vertexIndex >= sourceTrace.canvasPoints.length ||
+        vertexIndex >= sourceTrace.geoPoints.length) {
+      return;
+    }
+    final metersPerCanvasUnit = sourceTrace.metersPerCanvasUnit;
+    if (metersPerCanvasUnit == null || metersPerCanvasUnit <= 0) return;
+    final canvasDelta = point.offset - originalPoint.offset;
+    final nextCanvasPoints = <GraphPoint>[...sourceTrace.canvasPoints];
+    final nextGeoPoints = <GeoPoint>[...sourceTrace.geoPoints];
+    nextCanvasPoints[vertexIndex] = point;
+    nextGeoPoints[vertexIndex] =
+        TraceProjectionService.moveGeoPointByCanvasDelta(
+      point: sourceTrace.geoPoints[vertexIndex],
+      canvasDelta: canvasDelta,
+      metersPerCanvasUnit: metersPerCanvasUnit,
+    );
+    final nextTraces = <TraceGeometry>[..._traces];
+    nextTraces[traceIndex] = sourceTrace.copyWith(
+      canvasPoints: nextCanvasPoints,
+      geoPoints: nextGeoPoints,
+    );
+    setState(() {
+      _document.replaceTraces(nextTraces);
+      _dragMoved = true;
+    });
   }
 
   void _moveSegment(_DragTarget target, GraphPoint point) {
@@ -2897,11 +3028,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     final originalAnnotations = _dragOriginalAnnotations;
     final originalShapes = _dragOriginalShapes;
     final originalFreehandStrokes = _dragOriginalFreehandStrokes;
+    final originalTraces = _dragOriginalTraces;
 
     if (originalWallSegments == null ||
         originalAnnotations == null ||
         originalShapes == null ||
-        originalFreehandStrokes == null) {
+        originalFreehandStrokes == null ||
+        originalTraces == null) {
       return;
     }
 
@@ -2913,6 +3046,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           previousAnnotations: originalAnnotations,
           previousShapes: originalShapes,
           previousFreehandStrokes: originalFreehandStrokes,
+          previousTraces: originalTraces,
           previousActiveWallStart: _dragOriginalActiveWallStart,
           previousActivePathStartPoint: _dragOriginalActivePathStartPoint,
           previousActivePathStartSegmentIndex:
@@ -3655,11 +3789,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     final previousAnnotations = undoEntry.previousAnnotations;
     final previousShapes = undoEntry.previousShapes;
     final previousFreehandStrokes = undoEntry.previousFreehandStrokes;
+    final previousTraces = undoEntry.previousTraces;
 
     if (previousWallSegments == null ||
         previousAnnotations == null ||
         previousShapes == null ||
-        previousFreehandStrokes == null) {
+        previousFreehandStrokes == null ||
+        previousTraces == null) {
       _canvasStatus = 'Move could not be undone';
       return;
     }
@@ -3668,6 +3804,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _annotations = previousAnnotations;
     _shapes = previousShapes;
     _freehandStrokes = previousFreehandStrokes;
+    _document.replaceTraces(previousTraces);
     _activeWallStart = undoEntry.previousActiveWallStart;
     _activePathStartPoint = undoEntry.previousActivePathStartPoint;
     _pendingCurveControlPoint = null;
@@ -3749,9 +3886,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
             _canvasStatus = 'Freehand stroke deleted';
           }
           break;
+        case _SelectionKind.trace:
+          final index = currentSelection.index;
+          if (index >= 0 && index < _traces.length) {
+            final nextTraces = <TraceGeometry>[..._traces]..removeAt(index);
+            _document.replaceTraces(nextTraces);
+            _canvasStatus = 'Trace deleted';
+          }
+          break;
       }
 
       _selection = null;
+      _interaction.setSelected(null);
     });
   }
 
@@ -3830,6 +3976,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
             _canvasStatus = 'Freehand stroke duplicated';
           }
           break;
+        case _SelectionKind.trace:
+          _canvasStatus = 'Trace duplication is not available';
+          break;
       }
     });
   }
@@ -3888,6 +4037,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           break;
         case _SelectionKind.segment:
         case _SelectionKind.freehand:
+        case _SelectionKind.trace:
           _canvasStatus = 'Layer order applies to markers and shapes';
           return;
       }
@@ -4157,13 +4307,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     });
   }
 
-  Future<void> _openTraceWorkspace() async {
+  Future<void> _openTraceWorkspace({int? editIndex}) async {
     if (_isLayerLocked(_GraphLayer.trace)) {
       _showCanvasMessage('Trace layer is locked');
       return;
     }
-    int? editIndex;
-    if (_traces.isNotEmpty) {
+    if (editIndex == null && _traces.isNotEmpty) {
       editIndex = await showModalBottomSheet<int>(
         context: context,
         showDragHandle: true,
@@ -4228,6 +4377,42 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       );
       _canvasStatus = 'Satellite trace added at real-world scale';
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fitTraceInViewport(trace);
+    });
+  }
+
+  void _fitTraceInViewport(
+    TraceGeometry trace, {
+    Size? viewportSize,
+  }) {
+    if (trace.canvasPoints.isEmpty) return;
+    final viewportBox =
+        _canvasViewportKey.currentContext?.findRenderObject() as RenderBox?;
+    final size = viewportSize ?? viewportBox?.size;
+    if (size == null || size.isEmpty) return;
+    final left = trace.canvasPoints.map((point) => point.x).reduce(math.min);
+    final right = trace.canvasPoints.map((point) => point.x).reduce(math.max);
+    final top = trace.canvasPoints.map((point) => point.y).reduce(math.min);
+    final bottom = trace.canvasPoints.map((point) => point.y).reduce(math.max);
+    final bounds = Rect.fromLTRB(left, top, right, bottom);
+    const padding = 96.0;
+    final scale = math
+        .min(
+          (size.width - padding).clamp(1.0, double.infinity) /
+              math.max(bounds.width, 1),
+          (size.height - padding).clamp(1.0, double.infinity) /
+              math.max(bounds.height, 1),
+        )
+        .clamp(0.25, 4.0);
+    final viewportCenter = size.center(Offset.zero);
+    final next = Matrix4.identity()
+      ..setEntry(0, 0, scale)
+      ..setEntry(1, 1, scale)
+      ..setEntry(2, 2, scale)
+      ..setEntry(0, 3, viewportCenter.dx - (bounds.center.dx * scale))
+      ..setEntry(1, 3, viewportCenter.dy - (bounds.center.dy * scale));
+    _transformationController.value = next;
   }
 
   void _toggleLayerVisibility(_GraphLayer layer) {
@@ -4803,6 +4988,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   void _resetZoom() {
     _transformationController.value = Matrix4.identity();
+    setState(() {
+      _scaleLabel = '1:1';
+      _canvasStatus = 'Scale reset to 1:1';
+    });
   }
 
   void _toggleGridVisible() {
@@ -4828,6 +5017,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _setScaleLabel(String value) {
+    final requestedScale = double.tryParse(value.split(':').first) ?? 1.0;
+    final currentScale = _transformationController.value.getMaxScaleOnAxis();
+    final viewportBox =
+        _canvasViewportKey.currentContext?.findRenderObject() as RenderBox?;
+    final viewportCenter =
+        viewportBox?.size.center(Offset.zero) ?? const Offset(0, 0);
+    _zoomAt(viewportCenter, requestedScale / currentScale);
     setState(() {
       _scaleLabel = value;
       _canvasStatus = 'Scale set to $value';
@@ -5498,6 +5694,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           return MouseRegion(
                             cursor: _canvasCursor,
                             child: Listener(
+                              key: _canvasViewportKey,
                               behavior: HitTestBehavior.opaque,
                               onPointerDown: _handlePointerDown,
                               onPointerMove: _handlePointerMove,
@@ -5513,7 +5710,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                                 scaleEnabled: true,
                                 constrained: false,
                                 minScale: 0.25,
-                                maxScale: 4,
+                                maxScale: 10,
                                 boundaryMargin: const EdgeInsets.all(1200),
                                 child: RepaintBoundary(
                                   key: _canvasBoundaryKey,
@@ -5536,6 +5733,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                                     selectedShapeIndex: _selection?.shapeIndex,
                                     selectedFreehandIndex:
                                         _selection?.freehandIndex,
+                                    selectedTraceIndex: _selection?.traceIndex,
                                     hoveredSegmentIndex:
                                         _hoverSelection?.segmentIndex,
                                     hoveredAnnotationIndex:
@@ -5544,6 +5742,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                                         _hoverSelection?.shapeIndex,
                                     hoveredFreehandIndex:
                                         _hoverSelection?.freehandIndex,
+                                    hoveredTraceIndex:
+                                        _hoverSelection?.traceIndex,
                                     activeWallStart: _activeWallStart,
                                     previewSegment: _previewSegment,
                                     structureVisible:
@@ -7228,10 +7428,12 @@ class _CanvasSurface extends StatelessWidget {
     required this.selectedAnnotationIndex,
     required this.selectedShapeIndex,
     required this.selectedFreehandIndex,
+    required this.selectedTraceIndex,
     required this.hoveredSegmentIndex,
     required this.hoveredAnnotationIndex,
     required this.hoveredShapeIndex,
     required this.hoveredFreehandIndex,
+    required this.hoveredTraceIndex,
     required this.activeWallStart,
     required this.previewSegment,
     required this.structureVisible,
@@ -7257,10 +7459,12 @@ class _CanvasSurface extends StatelessWidget {
   final int? selectedAnnotationIndex;
   final int? selectedShapeIndex;
   final int? selectedFreehandIndex;
+  final int? selectedTraceIndex;
   final int? hoveredSegmentIndex;
   final int? hoveredAnnotationIndex;
   final int? hoveredShapeIndex;
   final int? hoveredFreehandIndex;
+  final int? hoveredTraceIndex;
   final GraphPoint? activeWallStart;
   final WallSegment? previewSegment;
   final bool structureVisible;
@@ -7304,7 +7508,13 @@ class _CanvasSurface extends StatelessWidget {
       child: SizedBox(
         width: canvasSize.width,
         height: canvasSize.height,
-        child: traceLayerVisible ? _TraceLayer(traces: traces) : null,
+        child: traceLayerVisible
+            ? _TraceLayer(
+                traces: traces,
+                selectedTraceIndex: selectedTraceIndex,
+                hoveredTraceIndex: hoveredTraceIndex,
+              )
+            : null,
       ),
     );
   }
@@ -7441,16 +7651,26 @@ class _GraphOverlayPainter extends CustomPainter {
 }
 
 class _TraceLayer extends StatelessWidget {
-  const _TraceLayer({required this.traces});
+  const _TraceLayer({
+    required this.traces,
+    required this.selectedTraceIndex,
+    required this.hoveredTraceIndex,
+  });
 
   final List<TraceGeometry> traces;
+  final int? selectedTraceIndex;
+  final int? hoveredTraceIndex;
 
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
       child: CustomPaint(
         size: const Size(double.infinity, double.infinity),
-        painter: TraceGeometryPainter(traces: traces),
+        painter: TraceGeometryPainter(
+          traces: traces,
+          selectedTraceIndex: selectedTraceIndex,
+          hoveredTraceIndex: hoveredTraceIndex,
+        ),
       ),
     );
   }
@@ -7472,6 +7692,7 @@ enum _SelectionKind {
   segment,
   shape,
   freehand,
+  trace,
 }
 
 enum _ContextAction {
@@ -7640,6 +7861,10 @@ class _Selection {
     return _Selection._(kind: _SelectionKind.freehand, index: index);
   }
 
+  factory _Selection.trace(int index) {
+    return _Selection._(kind: _SelectionKind.trace, index: index);
+  }
+
   final _SelectionKind kind;
   final int index;
 
@@ -7650,6 +7875,8 @@ class _Selection {
   int? get shapeIndex => kind == _SelectionKind.shape ? index : null;
 
   int? get freehandIndex => kind == _SelectionKind.freehand ? index : null;
+
+  int? get traceIndex => kind == _SelectionKind.trace ? index : null;
 
   @override
   bool operator ==(Object other) =>
@@ -7730,6 +7957,7 @@ class _UndoEntry {
     this.previousAnnotations,
     this.previousShapes,
     this.previousFreehandStrokes,
+    this.previousTraces,
     this.previousActiveWallStart,
     this.previousActivePathStartPoint,
     this.previousActivePathStartSegmentIndex,
@@ -7745,6 +7973,7 @@ class _UndoEntry {
   final List<GraphAnnotation>? previousAnnotations;
   final List<GraphShape>? previousShapes;
   final List<FreehandStroke>? previousFreehandStrokes;
+  final List<TraceGeometry>? previousTraces;
   final GraphPoint? previousActiveWallStart;
   final GraphPoint? previousActivePathStartPoint;
   final int? previousActivePathStartSegmentIndex;
@@ -7777,6 +8006,7 @@ enum _DragKind {
   shapeResize,
   shapeRotation,
   freehand,
+  traceVertex,
 }
 
 class _DragTarget {
@@ -7787,6 +8017,8 @@ class _DragTarget {
     this.segmentIndex,
     this.shapeIndex,
     this.freehandIndex,
+    this.traceIndex,
+    this.traceVertexIndex,
     this.endpointRefs = const <_SegmentEndpointRef>[],
     this.movesActiveWallStart = false,
     this.movesActivePathStart = false,
@@ -7911,12 +8143,30 @@ class _DragTarget {
     );
   }
 
+  factory _DragTarget.traceVertex({
+    required int traceIndex,
+    required int traceVertexIndex,
+    required GraphPoint originalPoint,
+    required double distance,
+  }) {
+    return _DragTarget._(
+      kind: _DragKind.traceVertex,
+      traceIndex: traceIndex,
+      traceVertexIndex: traceVertexIndex,
+      originalPoint: originalPoint,
+      distance: distance,
+      selection: _Selection.trace(traceIndex),
+    );
+  }
+
   final _DragKind kind;
   final double distance;
   final int? annotationIndex;
   final int? segmentIndex;
   final int? shapeIndex;
   final int? freehandIndex;
+  final int? traceIndex;
+  final int? traceVertexIndex;
   final List<_SegmentEndpointRef> endpointRefs;
   final bool movesActiveWallStart;
   final bool movesActivePathStart;

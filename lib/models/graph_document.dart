@@ -135,7 +135,7 @@ class GraphDocument extends ChangeNotifier {
 
   final String id;
   GraphCustomerInfo customer;
-  final DateTime createdAt;
+  DateTime createdAt;
   DateTime updatedAt;
 
   List<WallSegment> _wallSegments;
@@ -253,6 +253,12 @@ class GraphDocument extends ChangeNotifier {
 
   void updateCustomer(GraphCustomerInfo value) {
     customer = value;
+    _changed();
+  }
+
+  void updateJob(Job job) {
+    customer = GraphCustomerInfo.fromJob(job);
+    createdAt = job.createdDate;
     _changed();
   }
 

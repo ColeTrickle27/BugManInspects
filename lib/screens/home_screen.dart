@@ -92,6 +92,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 return _JobCard(
                   job: graph.job,
                   onTap: () => _openGraph(graph),
+                  onEdit: graph.isPersisted ? () => _editGraph(graph) : null,
+                  onDelete:
+                      graph.isPersisted ? () => _deleteGraph(graph) : null,
                 );
               },
             );
@@ -138,6 +141,66 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
     if (mounted) _refresh();
+  }
+
+  Future<void> _editGraph(SavedGraphSummary summary) async {
+    final repository = widget.repository;
+    if (repository == null || !summary.isPersisted) return;
+    Job? editedJob;
+    editedJob = await Navigator.of(context).push<Job>(
+      MaterialPageRoute<Job>(
+        builder: (context) => NewJobScreen(
+          initialJob: summary.job,
+          editOnly: true,
+          onCreateJob: (job) => editedJob = job,
+        ),
+      ),
+    );
+    if (!mounted || editedJob == null) return;
+    final document = await repository.loadGraph(summary.id);
+    if (document == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Saved graph could not be updated')),
+        );
+      }
+      return;
+    }
+    document.updateJob(editedJob!);
+    await repository.saveGraph(document);
+    document.markClean();
+    if (mounted) _refresh();
+  }
+
+  Future<void> _deleteGraph(SavedGraphSummary summary) async {
+    final repository = widget.repository;
+    if (repository == null || !summary.isPersisted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete saved job?'),
+        content: Text(
+          '${summary.job.displayName} and its saved graph will be removed from this device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await repository.deleteGraph(summary.id);
+    if (!mounted) return;
+    _refresh();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Saved job deleted')),
+    );
   }
 }
 
@@ -230,10 +293,17 @@ class _EmptyJobsState extends StatelessWidget {
 }
 
 class _JobCard extends StatelessWidget {
-  const _JobCard({required this.job, required this.onTap});
+  const _JobCard({
+    required this.job,
+    required this.onTap,
+    this.onEdit,
+    this.onDelete,
+  });
 
   final Job job;
   final VoidCallback onTap;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -270,9 +340,50 @@ class _JobCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                job.displayName,
-                style: Theme.of(context).textTheme.titleLarge,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      job.displayName,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  if (onEdit != null || onDelete != null)
+                    PopupMenuButton<_JobAction>(
+                      key: const ValueKey('job-actions-menu'),
+                      tooltip: 'Job actions',
+                      icon: const Icon(
+                        Icons.more_vert,
+                        color: AppColors.black,
+                      ),
+                      onSelected: (action) {
+                        switch (action) {
+                          case _JobAction.edit:
+                            onEdit?.call();
+                          case _JobAction.delete:
+                            onDelete?.call();
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        if (onEdit != null)
+                          const PopupMenuItem(
+                            value: _JobAction.edit,
+                            child: ListTile(
+                              leading: Icon(Icons.edit_outlined),
+                              title: Text('Edit job information'),
+                            ),
+                          ),
+                        if (onDelete != null)
+                          const PopupMenuItem(
+                            value: _JobAction.delete,
+                            child: ListTile(
+                              leading: Icon(Icons.delete_outline),
+                              title: Text('Delete saved job'),
+                            ),
+                          ),
+                      ],
+                    ),
+                ],
               ),
               if (address.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -293,6 +404,8 @@ class _JobCard extends StatelessWidget {
     );
   }
 }
+
+enum _JobAction { edit, delete }
 
 class _JobChip extends StatelessWidget {
   const _JobChip({

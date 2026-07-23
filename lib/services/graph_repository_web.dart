@@ -88,6 +88,29 @@ class IndexedDbGraphRepository implements GraphRepository {
   }
 
   @override
+  Future<void> deleteGraph(String id) async {
+    final document = await loadGraph(id);
+    final database = await _db;
+    final transaction = database.transaction(
+      [_documentsStore, _blobsStore],
+      idbModeReadWrite,
+    );
+    await transaction.objectStore(_documentsStore).delete(id);
+    if (document != null) {
+      final blobStore = transaction.objectStore(_blobsStore);
+      for (final attachment in document.attachments) {
+        if (attachment.blobKey.isNotEmpty) {
+          await blobStore.delete(attachment.blobKey);
+        }
+        if (attachment.thumbnailKey.isNotEmpty) {
+          await blobStore.delete(attachment.thumbnailKey);
+        }
+      }
+    }
+    await transaction.completed;
+  }
+
+  @override
   Future<Uint8List?> loadBlob(String key) async {
     final database = await _db;
     final transaction = database.transaction(_blobsStore, idbModeReadOnly);

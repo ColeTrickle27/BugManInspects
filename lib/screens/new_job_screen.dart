@@ -6,6 +6,8 @@ import 'graph_canvas_screen.dart';
 class NewJobScreen extends StatefulWidget {
   const NewJobScreen({
     required this.onCreateJob,
+    this.initialJob,
+    this.editOnly = false,
     super.key,
   });
 
@@ -18,6 +20,8 @@ class NewJobScreen extends StatefulWidget {
   ];
 
   final ValueChanged<Job> onCreateJob;
+  final Job? initialJob;
+  final bool editOnly;
 
   @override
   State<NewJobScreen> createState() => _NewJobScreenState();
@@ -37,8 +41,21 @@ class _NewJobScreenState extends State<NewJobScreen> {
   @override
   void initState() {
     super.initState();
-    _createdDate = DateUtils.dateOnly(DateTime.now());
+    final initialJob = widget.initialJob;
+    _createdDate = DateUtils.dateOnly(
+      initialJob?.createdDate ?? DateTime.now(),
+    );
     _dateController = TextEditingController(text: _formatDate(_createdDate));
+    if (initialJob != null) {
+      _locationNameController.text = initialJob.customerName;
+      _locationAddressController.text = initialJob.serviceAddress;
+      _pestPacLocationController.text = initialJob.pestPacLocationNumber;
+      _pestPacBillToController.text = initialJob.pestPacBillToNumber;
+      _createdByController.text = initialJob.createdBy;
+      _serviceType = NewJobScreen.serviceTypes.contains(initialJob.serviceType)
+          ? initialJob.serviceType
+          : 'Inspection';
+    }
   }
 
   @override
@@ -71,6 +88,7 @@ class _NewJobScreenState extends State<NewJobScreen> {
 
   void _createJob() {
     final job = Job(
+      id: widget.initialJob?.id,
       customerName: _locationNameController.text.trim(),
       serviceAddress: _locationAddressController.text.trim(),
       pestPacLocationNumber: _pestPacLocationController.text.trim(),
@@ -82,6 +100,11 @@ class _NewJobScreenState extends State<NewJobScreen> {
 
     widget.onCreateJob(job);
 
+    if (widget.editOnly) {
+      Navigator.of(context).pop(job);
+      return;
+    }
+
     Navigator.of(context).pushReplacementNamed(
       GraphCanvasScreen.routeName,
       arguments: job,
@@ -92,7 +115,7 @@ class _NewJobScreenState extends State<NewJobScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New Job'),
+        title: Text(widget.editOnly ? 'Edit Job' : 'New Job'),
       ),
       body: SafeArea(
         child: ListView(
@@ -185,8 +208,9 @@ class _NewJobScreenState extends State<NewJobScreen> {
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: _createJob,
-              icon: const Icon(Icons.arrow_forward),
-              label: const Text('Create Graph'),
+              icon: Icon(
+                  widget.editOnly ? Icons.save_outlined : Icons.arrow_forward),
+              label: Text(widget.editOnly ? 'Save Changes' : 'Create Graph'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(56),
               ),

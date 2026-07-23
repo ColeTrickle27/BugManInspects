@@ -42,6 +42,7 @@ enum EditorObjectKind {
   shape,
   freehand,
   segment,
+  trace,
 }
 
 @immutable

@@ -28,6 +28,8 @@ abstract class GraphRepository {
     Set<String> deletedBlobKeys = const {},
   });
 
+  Future<void> deleteGraph(String id);
+
   Future<Uint8List?> loadBlob(String key);
 }
 

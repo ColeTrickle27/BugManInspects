@@ -38,5 +38,20 @@ class MemoryGraphRepository implements GraphRepository {
   }
 
   @override
+  Future<void> deleteGraph(String id) async {
+    final json = _documents.remove(id);
+    if (json == null) return;
+    final document = GraphDocument.fromJson(json);
+    for (final attachment in document.attachments) {
+      if (attachment.blobKey.isNotEmpty) {
+        _blobs.remove(attachment.blobKey);
+      }
+      if (attachment.thumbnailKey.isNotEmpty) {
+        _blobs.remove(attachment.thumbnailKey);
+      }
+    }
+  }
+
+  @override
   Future<Uint8List?> loadBlob(String key) async => _blobs[key];
 }

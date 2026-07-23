@@ -20,6 +20,14 @@ void main() {
       ),
     );
     final bytes = Uint8List.fromList([1, 2, 3, 4]);
+    document.replaceAttachments(const [
+      GraphAttachment(
+        id: 'attachment-1',
+        name: 'photo.jpg',
+        blobKey: 'photo-1',
+        thumbnailKey: 'photo-1-thumb',
+      ),
+    ]);
 
     await repository.saveGraph(document, blobs: {'photo-1': bytes});
 
@@ -29,5 +37,11 @@ void main() {
     expect((await repository.loadGraph(document.id))?.customer.name,
         'Saved Location');
     expect(await repository.loadBlob('photo-1'), bytes);
+
+    await repository.deleteGraph(document.id);
+
+    expect(await repository.listGraphs(), isEmpty);
+    expect(await repository.loadGraph(document.id), isNull);
+    expect(await repository.loadBlob('photo-1'), isNull);
   });
 }

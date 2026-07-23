@@ -8,13 +8,22 @@ import '../services/measurement_service.dart';
 import '../services/trace_projection_service.dart';
 
 class TraceGeometryPainter extends CustomPainter {
-  const TraceGeometryPainter({required this.traces});
+  const TraceGeometryPainter({
+    required this.traces,
+    this.selectedTraceIndex,
+    this.hoveredTraceIndex,
+  });
 
   final List<TraceGeometry> traces;
+  final int? selectedTraceIndex;
+  final int? hoveredTraceIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (final trace in traces) {
+    for (var traceIndex = 0; traceIndex < traces.length; traceIndex += 1) {
+      final trace = traces[traceIndex];
+      final selected = traceIndex == selectedTraceIndex;
+      final hovered = traceIndex == hoveredTraceIndex;
       if (trace.canvasPoints.length < 2) continue;
       final path = Path()
         ..moveTo(trace.canvasPoints.first.x, trace.canvasPoints.first.y);
@@ -33,16 +42,22 @@ class TraceGeometryPainter extends CustomPainter {
       canvas.drawPath(
         path,
         Paint()
-          ..color = const Color(0xFFCC2000)
+          ..color = selected
+              ? const Color(0xFF1976D2)
+              : hovered
+                  ? const Color(0xFFFF6F00)
+                  : const Color(0xFFCC2000)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 5
+          ..strokeWidth = selected ? 7 : 5
           ..strokeJoin = StrokeJoin.round,
       );
       for (final point in trace.canvasPoints) {
         canvas.drawCircle(
           point.offset,
-          7,
-          Paint()..color = const Color(0xFFCC2000),
+          selected ? 10 : 7,
+          Paint()
+            ..color =
+                selected ? const Color(0xFF1976D2) : const Color(0xFFCC2000),
         );
       }
       _drawSummary(canvas, trace);
@@ -123,5 +138,7 @@ class TraceGeometryPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant TraceGeometryPainter oldDelegate) =>
-      oldDelegate.traces != traces;
+      oldDelegate.traces != traces ||
+      oldDelegate.selectedTraceIndex != selectedTraceIndex ||
+      oldDelegate.hoveredTraceIndex != hoveredTraceIndex;
 }

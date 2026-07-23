@@ -106,4 +106,16 @@ void main() {
       expect(point.y, inInclusiveRange(0, 2600));
     }
   });
+
+  test('canvas vertex movement updates authoritative geographic position', () {
+    const point = GeoPoint(latitude: 35, longitude: -78);
+    final moved = TraceProjectionService.moveGeoPointByCanvasDelta(
+      point: point,
+      canvasDelta: const Offset(20, -10),
+      metersPerCanvasUnit: 0.5,
+    );
+
+    expect(moved.latitude, greaterThan(point.latitude));
+    expect(moved.longitude, greaterThan(point.longitude));
+  });
 }

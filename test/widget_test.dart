@@ -5,7 +5,9 @@ import 'package:bugman_graphs/editor/editor_interaction_controller.dart';
 import 'package:bugman_graphs/models/graph_annotation.dart';
 import 'package:bugman_graphs/models/graph_shape.dart';
 import 'package:bugman_graphs/models/graph_document.dart';
+import 'package:bugman_graphs/models/graph_point.dart';
 import 'package:bugman_graphs/models/job.dart';
+import 'package:bugman_graphs/models/trace_geometry.dart';
 import 'package:bugman_graphs/screens/graph_canvas_screen.dart';
 import 'package:bugman_graphs/screens/home_screen.dart';
 import 'package:bugman_graphs/screens/new_job_screen.dart';
@@ -199,6 +201,58 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Untitled Job'), findsNWidgets(2));
+  });
+
+  testWidgets('saved job information can be edited and deleted',
+      (tester) async {
+    final repository = MemoryGraphRepository();
+    final job = Job(
+      id: 'editable-job',
+      customerName: 'Original Location',
+      serviceAddress: '10 Old Road',
+      pestPacLocationNumber: '100',
+      pestPacBillToNumber: '200',
+      serviceType: 'Inspection',
+      createdBy: 'Original User',
+      createdDate: DateTime(2026, 7, 20),
+    );
+    await repository.saveGraph(GraphDocument.forJob(job));
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Job actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit job information'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Location Name'),
+      'Updated Location',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Location Address'),
+      '20 New Road',
+    );
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Updated Location'), findsOneWidget);
+    expect(
+      (await repository.loadGraph(job.id))?.customer.serviceAddress,
+      '20 New Road',
+    );
+
+    await tester.tap(find.byTooltip('Job actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete saved job'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete saved job?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+
+    expect(await repository.listGraphs(), isEmpty);
+    expect(find.text('No jobs yet'), findsOneWidget);
   });
 
   testWidgets('structure plotting requires points and Enter completes it',
@@ -509,6 +563,92 @@ void main() {
     expect(find.text('Snap to objects'), findsOneWidget);
     expect(find.text('10:1'), findsOneWidget);
     expect(find.text('20:1'), findsNothing);
+  });
+
+  testWidgets('scale options update the canvas transformation', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+    final viewer = tester.widget<InteractiveViewer>(
+      find.byType(InteractiveViewer),
+    );
+    final controller = viewer.transformationController!;
+    expect(controller.value.getMaxScaleOnAxis(), closeTo(1, 0.001));
+
+    await tester.tap(find.byTooltip('Canvas options'));
+    await tester.pumpAndSettle();
+    final scaleItem = find.ancestor(
+      of: find.text('3:1'),
+      matching: find.byWidgetPredicate((widget) => widget is PopupMenuItem),
+    );
+    await tester.tap(scaleItem);
+    await tester.pumpAndSettle();
+
+    expect(controller.value.getMaxScaleOnAxis(), closeTo(3, 0.001));
+  });
+
+  testWidgets('completed Trace vertices can be moved and trace can be deleted',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final job = Job(
+      customerName: 'Trace Test',
+      serviceAddress: '1 Trace Way',
+      pestPacLocationNumber: '',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 7, 23),
+    );
+    final document = GraphDocument(
+      id: job.id,
+      customer: GraphCustomerInfo.fromJob(job),
+      layers: const {'trace': GraphLayerState(visible: true)},
+      traces: const [
+        TraceGeometry(
+          id: 'trace-1',
+          label: 'Property Trace 1',
+          geoPoints: [
+            GeoPoint(latitude: 35.0, longitude: -78.0),
+            GeoPoint(latitude: 35.0, longitude: -77.999),
+            GeoPoint(latitude: 34.999, longitude: -77.999),
+          ],
+          canvasPoints: [
+            GraphPoint(x: 1700, y: 1200),
+            GraphPoint(x: 1900, y: 1200),
+            GraphPoint(x: 1900, y: 1400),
+          ],
+          metersPerCanvasUnit: 0.5,
+        ),
+      ],
+    )..markClean();
+    await tester.pumpWidget(
+      MaterialApp(home: GraphCanvasScreen(document: document)),
+    );
+    await tester.pumpAndSettle();
+
+    final viewerFinder = find.byType(InteractiveViewer);
+    final controller = tester
+        .widget<InteractiveViewer>(viewerFinder)
+        .transformationController!;
+    const scenePoint = Offset(1700, 1200);
+    final localPoint = MatrixUtils.transformPoint(
+      controller.value,
+      scenePoint,
+    );
+    final globalPoint = tester.getTopLeft(viewerFinder) + localPoint;
+    await tester.dragFrom(globalPoint, const Offset(48, 24));
+    await tester.pump();
+
+    expect(document.traces.single.canvasPoints.first.x, greaterThan(1700));
+    expect(document.traces.single.canvasPoints.first.y, greaterThan(1200));
+    expect(document.traces.single.geoPoints.first.longitude, isNot(-78.0));
+
+    await tester.tap(find.byTooltip('Delete selection'));
+    await tester.pump();
+    expect(document.traces, isEmpty);
   });
 
   testWidgets('main toolbar tools can be dragged into quick tools',
