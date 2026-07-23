@@ -44,26 +44,13 @@ http://localhost:8787
 
 ## Satellite trace setup
 
-The Trace workspace uses Google Maps JavaScript and Geocoding. Create a
-user-owned Google Cloud project with billing and budget alerts, enable those
-two APIs, and create a browser key restricted to these referrers:
+The Trace workspace is limited to North Carolina locations. It uses the U.S.
+Census Geocoding API for address lookup and NC OneMap's latest statewide
+orthoimagery for the aerial tracing surface. No API key, cloud account,
+billing, or build-time secret is required.
 
-```text
-http://127.0.0.1:*
-http://localhost:*
-https://coletrickle27.github.io/BugManInspects/*
-```
-
-Do not commit the key. For local development, pass it at build/run time:
-
-```sh
-flutter run -d web-server --web-port 8787 --web-hostname 127.0.0.1 --dart-define=GOOGLE_MAPS_API_KEY=YOUR_RESTRICTED_KEY
-```
-
-For GitHub Pages, add the same restricted key as the repository Actions
-secret `GOOGLE_MAPS_API_KEY`. Without it, the app still builds and the Trace
-workspace displays configuration guidance instead of attempting to load a
-map.
+The imagery is an interactive tracing aid only. Graph exports retain the
+scaled trace geometry and measurements without copying the aerial tiles.
 
 ## Validation
 

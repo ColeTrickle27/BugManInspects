@@ -35,6 +35,42 @@
 <body>
   <script>
     document.addEventListener('contextmenu', (event) => event.preventDefault());
+
+    // The Census geocoder supports browser clients through JSONP rather than
+    // CORS. Wrap it in a Promise so Dart can await it without an API key.
+    window.bugmanCensusGeocode = function(address) {
+      return new Promise(function(resolve, reject) {
+        const callbackName = '__bugmanCensus' +
+          Date.now().toString(36) + Math.random().toString(36).slice(2);
+        const script = document.createElement('script');
+        const timeout = window.setTimeout(function() {
+          cleanup();
+          reject(new Error('The Census address search timed out.'));
+        }, 15000);
+        function cleanup() {
+          window.clearTimeout(timeout);
+          script.remove();
+          delete window[callbackName];
+        }
+        window[callbackName] = function(data) {
+          cleanup();
+          resolve(data);
+        };
+        script.onerror = function() {
+          cleanup();
+          reject(new Error('The Census address search could not load.'));
+        };
+        const params = new URLSearchParams({
+          address: address,
+          benchmark: 'Public_AR_Current',
+          format: 'jsonp',
+          callback: callbackName,
+        });
+        script.src = 'https://geocoding.geo.census.gov/geocoder/locations/' +
+          'onelineaddress?' + params.toString();
+        document.head.appendChild(script);
+      });
+    };
   </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.

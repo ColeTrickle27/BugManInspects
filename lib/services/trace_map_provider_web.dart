@@ -1,64 +1,30 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
-
-import 'dart:async';
-import 'dart:html' as html;
 import 'dart:js_interop';
 
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_dragmarker/flutter_map_dragmarker.dart';
+import 'package:latlong2/latlong.dart' as latlong;
 
 import '../models/trace_geometry.dart';
+import 'census_geocoder.dart';
 import 'trace_map_provider.dart';
 
-TraceMapProvider createTraceMapProvider() => GoogleWebTraceMapProvider();
+TraceMapProvider createTraceMapProvider() => NorthCarolinaTraceMapProvider();
 
-class GoogleWebTraceMapProvider implements TraceMapProvider {
-  static const String _apiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
-  static Future<void>? _initialization;
+class NorthCarolinaTraceMapProvider implements TraceMapProvider {
+  static const String _imageryWmsUrl =
+      'https://services.nconemap.gov/secure/services/Imagery/'
+      'Orthoimagery_Latest/ImageServer/WMSServer?';
 
   @override
-  Future<void> initialize() {
-    if (_apiKey.trim().isEmpty) {
-      throw const TraceMapConfigurationException(
-        'Google Maps is not configured. Build with '
-        '--dart-define=GOOGLE_MAPS_API_KEY=your_restricted_key.',
-      );
-    }
-    return _initialization ??= _loadGoogleMaps();
-  }
-
-  Future<void> _loadGoogleMaps() async {
-    if (_googleMaps != null) return;
-
-    final completer = Completer<void>();
-    final script = html.ScriptElement()
-      ..id = 'bugman-google-maps'
-      ..async = true
-      ..defer = true
-      ..src = 'https://maps.googleapis.com/maps/api/js?key=$_apiKey';
-    script.onLoad.first.then((_) => completer.complete());
-    script.onError.first.then(
-      (_) => completer.completeError(
-        const TraceMapConfigurationException(
-          'Google Maps could not load. Check the API key and referrer rules.',
-        ),
-      ),
-    );
-    html.document.head?.append(script);
-    return completer.future.timeout(const Duration(seconds: 20));
-  }
+  Future<void> initialize() async {}
 
   @override
   Future<GeoPoint?> geocode(String address) async {
-    await initialize();
-    final response = await _GoogleGeocoder()
-        .geocode(<String, Object?>{'address': address}.jsify() as JSObject)
-        .toDart
-        .timeout(const Duration(seconds: 15));
-    final results = response.results.toDart;
-    if (results.isEmpty) return null;
-    final location = results.first.geometry.location;
-    return GeoPoint(latitude: location.lat(), longitude: location.lng());
+    final response = await _bugmanCensusGeocode(
+      northCarolinaGeocodeQuery(address),
+    ).toDart.timeout(const Duration(seconds: 15));
+    return parseNorthCarolinaCensusMatch(response.dartify());
   }
 
   @override
@@ -68,83 +34,135 @@ class GoogleWebTraceMapProvider implements TraceMapProvider {
     required ValueChanged<GeoPoint> onMapTap,
     required void Function(int index, GeoPoint point) onVertexMoved,
   }) {
-    final polygonPoints = <LatLng>[
-      for (final point in points) LatLng(point.latitude, point.longitude),
+    final mapPoints = <latlong.LatLng>[
+      for (final point in points)
+        latlong.LatLng(point.latitude, point.longitude),
     ];
-    return GoogleMap(
-      mapType: MapType.satellite,
-      initialCameraPosition: CameraPosition(
-        target: LatLng(center.latitude, center.longitude),
-        zoom: 20,
-      ),
-      mapToolbarEnabled: false,
-      myLocationButtonEnabled: false,
-      zoomControlsEnabled: false,
-      onTap: (position) => onMapTap(
-        GeoPoint(latitude: position.latitude, longitude: position.longitude),
-      ),
-      polygons: points.length < 3
-          ? const <Polygon>{}
-          : <Polygon>{
-              Polygon(
-                polygonId: const PolygonId('active-trace'),
-                points: polygonPoints,
-                strokeColor: const Color(0xFFCC2000),
-                strokeWidth: 4,
-                fillColor: const Color(0x33CC2000),
-              ),
-            },
-      polylines: points.length < 2
-          ? const <Polyline>{}
-          : <Polyline>{
-              Polyline(
-                polylineId: const PolylineId('active-trace-line'),
-                points: polygonPoints,
-                color: const Color(0xFFCC2000),
-                width: 4,
-              ),
-            },
-      markers: <Marker>{
-        for (var index = 0; index < points.length; index += 1)
-          Marker(
-            markerId: MarkerId('trace-vertex-$index'),
-            position: polygonPoints[index],
-            draggable: true,
-            onDragEnd: (position) => onVertexMoved(
-              index,
+    return Stack(
+      children: [
+        FlutterMap(
+          options: MapOptions(
+            initialCenter: latlong.LatLng(
+              center.latitude,
+              center.longitude,
+            ),
+            initialZoom: 19,
+            initialCameraFit: mapPoints.length >= 2
+                ? CameraFit.coordinates(
+                    coordinates: mapPoints,
+                    padding: const EdgeInsets.all(56),
+                    maxZoom: 19,
+                  )
+                : null,
+            minZoom: 4,
+            maxZoom: 21,
+            onTap: (_, position) => onMapTap(
               GeoPoint(
                 latitude: position.latitude,
                 longitude: position.longitude,
               ),
             ),
           ),
-      },
+          children: [
+            TileLayer(
+              wmsOptions: WMSTileLayerOptions(
+                baseUrl: _imageryWmsUrl,
+                layers: const ['0'],
+                format: 'image/jpeg',
+                transparent: false,
+                version: '1.3.0',
+              ),
+              maxNativeZoom: 21,
+              userAgentPackageName: 'com.holloman.bugman_graphs',
+            ),
+            if (mapPoints.length >= 3)
+              PolygonLayer(
+                polygons: [
+                  Polygon(
+                    points: mapPoints,
+                    color: const Color(0x33CC2000),
+                    borderColor: const Color(0xFFCC2000),
+                    borderStrokeWidth: 4,
+                  ),
+                ],
+              ),
+            if (mapPoints.length >= 2)
+              PolylineLayer(
+                polylines: [
+                  Polyline(
+                    points: mapPoints,
+                    color: const Color(0xFFCC2000),
+                    strokeWidth: 4,
+                  ),
+                ],
+              ),
+            DragMarkers(
+              markers: [
+                for (var index = 0; index < mapPoints.length; index += 1)
+                  DragMarker(
+                    point: mapPoints[index],
+                    size: const Size(44, 44),
+                    builder: (context, position, isDragging) =>
+                        _VertexPin(number: index + 1),
+                    onDragEnd: (_, position) => onVertexMoved(
+                      index,
+                      GeoPoint(
+                        latitude: position.latitude,
+                        longitude: position.longitude,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+        const Positioned(
+          right: 6,
+          bottom: 4,
+          child: DecoratedBox(
+            decoration: BoxDecoration(color: Color(0xCCFFFFFF)),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              child: Text(
+                'NC OneMap Orthoimagery · NCCGIA / NC 911 Board',
+                style: TextStyle(fontSize: 10, color: Colors.black),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
-@JS('google.maps')
-external JSObject? get _googleMaps;
+class _VertexPin extends StatelessWidget {
+  const _VertexPin({required this.number});
 
-@JS('google.maps.Geocoder')
-extension type _GoogleGeocoder._(JSObject _) implements JSObject {
-  external factory _GoogleGeocoder();
-  external JSPromise<_GoogleGeocoderResponse> geocode(JSObject request);
+  final int number;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFCC2000),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: const [
+          BoxShadow(color: Colors.black38, blurRadius: 3, offset: Offset(0, 1)),
+        ],
+      ),
+      child: Center(
+        child: Text(
+          '$number',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-extension type _GoogleGeocoderResponse._(JSObject _) implements JSObject {
-  external JSArray<_GoogleGeocoderResult> get results;
-}
-
-extension type _GoogleGeocoderResult._(JSObject _) implements JSObject {
-  external _GoogleGeometry get geometry;
-}
-
-extension type _GoogleGeometry._(JSObject _) implements JSObject {
-  external _GoogleLatLng get location;
-}
-
-extension type _GoogleLatLng._(JSObject _) implements JSObject {
-  external double lat();
-  external double lng();
-}
+@JS('bugmanCensusGeocode')
+external JSPromise<JSObject> _bugmanCensusGeocode(String address);

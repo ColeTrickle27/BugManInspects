@@ -224,8 +224,9 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'The Google key must enable Maps JavaScript and Geocoding '
-                  'and be restricted to this app’s web origins.',
+                  'Trace searches North Carolina addresses and uses NC '
+                  'OneMap aerial imagery. Check the address and your internet '
+                  'connection, then try again.',
                   textAlign: TextAlign.center,
                 ),
               ],
