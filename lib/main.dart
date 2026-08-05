@@ -26,7 +26,7 @@ class _BugManGraphsAppState extends State<BugManGraphsApp> {
   late final _portalService = createBugManPortalService();
   late final String? _portalKey = _readPortalKey();
   late final Future<GraphDocument?>? _portalGraph =
-      _portalKey == null ? null : _loadPortalGraph(_portalKey!);
+      _portalKey == null ? null : _loadPortalGraph(_portalKey);
   final List<Job> _jobs = <Job>[];
 
   String? _readPortalKey() {
