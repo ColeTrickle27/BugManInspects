@@ -103,7 +103,7 @@ class GraphAnnotationsPainter extends CustomPainter {
     final center = annotation.point.offset;
     final color = annotation.color ?? annotation.markerType.defaultColor;
     final iconSize = 34 * annotation.size;
-    final icon = iconForGraphMarker(annotation.markerType);
+    final icon = iconForGraphAnnotation(annotation);
 
     canvas.save();
     canvas.translate(center.dx, center.dy);

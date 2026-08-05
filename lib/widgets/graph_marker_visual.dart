@@ -42,3 +42,16 @@ IconData iconForGraphMarker(GraphMarkerType marker) => switch (marker.symbol) {
       GraphMarkerSymbol.alert => Icons.report_problem_outlined,
       GraphMarkerSymbol.generic => Icons.place_outlined,
     };
+
+IconData iconForGraphAnnotation(GraphAnnotation annotation) {
+  if (annotation.markerType == GraphMarkerType.moisture) {
+    if (annotation.note.contains('Immediate Attention Needed')) {
+      return Icons.dangerous_outlined;
+    }
+    if (annotation.note.contains('High Moisture')) {
+      return Icons.warning_amber_rounded;
+    }
+  }
+
+  return iconForGraphMarker(annotation.markerType);
+}

@@ -59,7 +59,7 @@ class GraphCanvasScreen extends StatefulWidget {
 class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   static const Size _canvasSize = Size(3600, 2600);
   static const double _endpointSnapDistance = 22;
-  static const double _gridSnapSize = 12;
+  static const double _gridSnapSize = WallSegment.pixelsPerFoot;
   static const double _minimumWallLength = 6;
   static const double _tapMovementLimit = 10;
   static const Duration _doubleClickWindow = Duration(milliseconds: 360);
@@ -359,6 +359,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _selectedDrawingDefaults?.pattern ?? _defaultShapePattern;
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext != null &&
+        (focusedContext.widget is EditableText ||
+            focusedContext.findAncestorWidgetOfExactType<EditableText>() !=
+                null)) {
+      return KeyEventResult.ignored;
+    }
+
     if (event.logicalKey == LogicalKeyboardKey.space) {
       final nextValue = event is KeyDownEvent || event is KeyRepeatEvent;
       if (_spacePanActive != nextValue) {
@@ -1928,7 +1936,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   GraphPoint _snapWallPoint(GraphPoint point, GraphPoint? activeStart) {
     final gridPoint = _snapToGrid ? _snapPointToGrid(point) : point;
 
-    if (activeStart == null) {
+    if (activeStart == null || !_snapToObjects) {
       return gridPoint;
     }
 
@@ -3090,11 +3098,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _showCanvasMessage('Enter a valid moisture percentage');
         return;
       }
-      final condition = value >= 20
-          ? 'Immediate action Req.'
+      final condition = value > 20
+          ? 'Immediate Attention Needed'
           : value >= 10 && value <= 15
               ? 'Good'
-              : 'Caution';
+              : 'High Moisture';
       final formatted = '${value.round()}% — $condition';
       annotation = annotation.copyWith(
         label: formatted,

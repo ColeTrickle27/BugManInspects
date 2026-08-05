@@ -278,6 +278,7 @@ void main() {
     expect(moistureMarkerColor(9).toARGB32(), 0xFFE0AD19);
     expect(moistureMarkerColor(10).toARGB32(), 0xFF2E7D55);
     expect(moistureMarkerColor(19).toARGB32(), 0xFFE0AD19);
-    expect(moistureMarkerColor(20).toARGB32(), 0xFFCC2000);
+    expect(moistureMarkerColor(20).toARGB32(), 0xFFE0AD19);
+    expect(moistureMarkerColor(20.1).toARGB32(), 0xFFCC2000);
   });
 }

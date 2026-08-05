@@ -749,7 +749,7 @@ void main() {
     expect(_annotationCount(tester), 1);
     final annotations =
         _graphOverlayPainter(tester).annotations as List<dynamic>;
-    expect(annotations.single.label, '18% — Caution');
+    expect(annotations.single.label, '18% — High Moisture');
   });
 
   testWidgets('photo tool adds multiple selected images to one pin',

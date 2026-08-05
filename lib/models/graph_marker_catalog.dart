@@ -47,6 +47,6 @@ bool isInspectionMarker(GraphMarkerType marker) =>
 Color moistureMarkerColor(double percentage) {
   if (percentage < 10) return const Color(0xFFE0AD19);
   if (percentage <= 15) return const Color(0xFF2E7D55);
-  if (percentage < 20) return const Color(0xFFE0AD19);
+  if (percentage <= 20) return const Color(0xFFE0AD19);
   return const Color(0xFFCC2000);
 }
