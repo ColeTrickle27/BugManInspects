@@ -210,138 +210,153 @@ class CanvasToolbar extends StatelessWidget {
         child: SingleChildScrollView(
           child: Column(
             children: [
-              _ToolbarHeader(label: 'Basic', onCollapse: onCollapse),
-              _ActionButton(
-                action: const CanvasToolbarAction.preset(
-                  GraphDrawingPreset.measurementLine,
-                ),
-                selectedTool: selectedTool,
-                selectedPreset: selectedDrawingPreset,
-                selectedMarker: selectedMarkerType,
-                onPressed: _activate,
-                onDoubleTap: () => onActionDoubleTapped(
-                  const CanvasToolbarAction.preset(
-                    GraphDrawingPreset.measurementLine,
+              _ToolbarHeader(onCollapse: onCollapse),
+              _CollapsibleToolbarSection(
+                label: 'Basic',
+                children: [
+                  _ActionButton(
+                    action: const CanvasToolbarAction.preset(
+                      GraphDrawingPreset.measurementLine,
+                    ),
+                    selectedTool: selectedTool,
+                    selectedPreset: selectedDrawingPreset,
+                    selectedMarker: selectedMarkerType,
+                    onPressed: _activate,
+                    onDoubleTap: () => onActionDoubleTapped(
+                      const CanvasToolbarAction.preset(
+                        GraphDrawingPreset.measurementLine,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              _ActionPicker(
-                groupLabel: 'Lines',
-                displayedAction: _displayedAction(basicLineToolbarActions),
-                actions: basicLineToolbarActions,
-                selectedTool: selectedTool,
-                selectedPreset: selectedDrawingPreset,
-                selectedMarker: selectedMarkerType,
-                onSelected: _activate,
-              ),
-              const SizedBox(height: 8),
-              _ActionPicker(
-                groupLabel: 'Basic Shapes',
-                displayedAction: _displayedAction(basicShapeToolbarActions),
-                actions: basicShapeToolbarActions,
-                selectedTool: selectedTool,
-                selectedPreset: selectedDrawingPreset,
-                selectedMarker: selectedMarkerType,
-                onSelected: _activate,
-              ),
-              const Divider(height: 22),
-              const _ToolbarGroupLabel(label: 'Structures'),
-              _ActionButton(
-                action: const CanvasToolbarAction.preset(
-                  GraphDrawingPreset.mainStructure,
-                ),
-                selectedTool: selectedTool,
-                selectedPreset: selectedDrawingPreset,
-                selectedMarker: selectedMarkerType,
-                onPressed: _activate,
-                onDoubleTap: () => onActionDoubleTapped(
-                  const CanvasToolbarAction.preset(
-                    GraphDrawingPreset.mainStructure,
+                  const SizedBox(height: 8),
+                  _ActionPicker(
+                    groupLabel: 'Lines',
+                    displayedAction: _displayedAction(basicLineToolbarActions),
+                    actions: basicLineToolbarActions,
+                    selectedTool: selectedTool,
+                    selectedPreset: selectedDrawingPreset,
+                    selectedMarker: selectedMarkerType,
+                    onSelected: _activate,
                   ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              _ActionPicker(
-                groupLabel: 'Building Features',
-                displayedAction:
-                    _displayedAction(buildingFeatureToolbarActions),
-                actions: buildingFeatureToolbarActions,
-                selectedTool: selectedTool,
-                selectedPreset: selectedDrawingPreset,
-                selectedMarker: selectedMarkerType,
-                onSelected: _activate,
-              ),
-              const SizedBox(height: 8),
-              _ActionPicker(
-                groupLabel: 'Property',
-                displayedAction: _displayedAction(propertyToolbarActions),
-                actions: propertyToolbarActions,
-                selectedTool: selectedTool,
-                selectedPreset: selectedDrawingPreset,
-                selectedMarker: selectedMarkerType,
-                onSelected: _activate,
-              ),
-              const SizedBox(height: 8),
-              _ActionPicker(
-                groupLabel: 'Utility',
-                displayedAction: _displayedAction(utilityToolbarActions),
-                actions: utilityToolbarActions,
-                selectedTool: selectedTool,
-                selectedPreset: selectedDrawingPreset,
-                selectedMarker: selectedMarkerType,
-                onSelected: _activate,
-              ),
-              const Divider(height: 22),
-              const _ToolbarGroupLabel(label: 'Inspection Markers'),
-              for (final marker in const [
-                GraphMarkerType.moisture,
-                GraphMarkerType.termiteActivity,
-              ]) ...[
-                _ActionButton(
-                  action: CanvasToolbarAction.marker(marker),
-                  selectedTool: selectedTool,
-                  selectedPreset: selectedDrawingPreset,
-                  selectedMarker: selectedMarkerType,
-                  onPressed: _activate,
-                  onDoubleTap: () => onActionDoubleTapped(
-                    CanvasToolbarAction.marker(marker),
+                  const SizedBox(height: 8),
+                  _ActionPicker(
+                    groupLabel: 'Basic Shapes',
+                    displayedAction: _displayedAction(basicShapeToolbarActions),
+                    actions: basicShapeToolbarActions,
+                    selectedTool: selectedTool,
+                    selectedPreset: selectedDrawingPreset,
+                    selectedMarker: selectedMarkerType,
+                    onSelected: _activate,
                   ),
-                ),
-                const SizedBox(height: 8),
-              ],
-              for (final action in const [
-                CanvasToolbarAction.tool(CanvasTool.text),
-                CanvasToolbarAction.tool(CanvasTool.photo),
-              ]) ...[
-                _ActionButton(
-                  action: action,
-                  selectedTool: selectedTool,
-                  selectedPreset: selectedDrawingPreset,
-                  selectedMarker: selectedMarkerType,
-                  onPressed: _activate,
-                  onDoubleTap: () => onActionDoubleTapped(action),
-                ),
-                const SizedBox(height: 8),
-              ],
-              _MarkerPickerButton(
-                tooltipLabel: 'More Inspection Markers',
-                selectedMarker: selectedMarkerType,
-                active: selectedTool == CanvasTool.marker &&
-                    inspectionMarkerTypes.skip(2).contains(selectedMarkerType),
-                markers: inspectionMarkerTypes.skip(2).toList(),
-                onSelected: onMarkerSelected,
+                ],
               ),
-              const SizedBox(height: 8),
-              const Divider(height: 22),
-              const _ToolbarGroupLabel(label: 'Treatment Markers'),
-              _MarkerPickerButton(
-                tooltipLabel: 'Treatment Marker',
-                selectedMarker: selectedMarkerType,
-                active: selectedTool == CanvasTool.marker &&
-                    treatmentMarkerTypes.contains(selectedMarkerType),
-                markers: treatmentMarkerTypes,
-                onSelected: onMarkerSelected,
+              _CollapsibleToolbarSection(
+                label: 'Structures',
+                children: [
+                  _ActionButton(
+                    action: const CanvasToolbarAction.preset(
+                      GraphDrawingPreset.mainStructure,
+                    ),
+                    selectedTool: selectedTool,
+                    selectedPreset: selectedDrawingPreset,
+                    selectedMarker: selectedMarkerType,
+                    onPressed: _activate,
+                    onDoubleTap: () => onActionDoubleTapped(
+                      const CanvasToolbarAction.preset(
+                        GraphDrawingPreset.mainStructure,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _ActionPicker(
+                    groupLabel: 'Building Features',
+                    displayedAction:
+                        _displayedAction(buildingFeatureToolbarActions),
+                    actions: buildingFeatureToolbarActions,
+                    selectedTool: selectedTool,
+                    selectedPreset: selectedDrawingPreset,
+                    selectedMarker: selectedMarkerType,
+                    onSelected: _activate,
+                  ),
+                  const SizedBox(height: 8),
+                  _ActionPicker(
+                    groupLabel: 'Property',
+                    displayedAction: _displayedAction(propertyToolbarActions),
+                    actions: propertyToolbarActions,
+                    selectedTool: selectedTool,
+                    selectedPreset: selectedDrawingPreset,
+                    selectedMarker: selectedMarkerType,
+                    onSelected: _activate,
+                  ),
+                  const SizedBox(height: 8),
+                  _ActionPicker(
+                    groupLabel: 'Utility',
+                    displayedAction: _displayedAction(utilityToolbarActions),
+                    actions: utilityToolbarActions,
+                    selectedTool: selectedTool,
+                    selectedPreset: selectedDrawingPreset,
+                    selectedMarker: selectedMarkerType,
+                    onSelected: _activate,
+                  ),
+                ],
+              ),
+              _CollapsibleToolbarSection(
+                label: 'Inspection Markers',
+                children: [
+                  for (final marker in const [
+                    GraphMarkerType.moisture,
+                    GraphMarkerType.termiteActivity,
+                  ]) ...[
+                    _ActionButton(
+                      action: CanvasToolbarAction.marker(marker),
+                      selectedTool: selectedTool,
+                      selectedPreset: selectedDrawingPreset,
+                      selectedMarker: selectedMarkerType,
+                      onPressed: _activate,
+                      onDoubleTap: () => onActionDoubleTapped(
+                        CanvasToolbarAction.marker(marker),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  for (final action in const [
+                    CanvasToolbarAction.tool(CanvasTool.text),
+                    CanvasToolbarAction.tool(CanvasTool.photo),
+                  ]) ...[
+                    _ActionButton(
+                      action: action,
+                      selectedTool: selectedTool,
+                      selectedPreset: selectedDrawingPreset,
+                      selectedMarker: selectedMarkerType,
+                      onPressed: _activate,
+                      onDoubleTap: () => onActionDoubleTapped(action),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  _MarkerPickerButton(
+                    tooltipLabel: 'More Inspection Markers',
+                    selectedMarker: selectedMarkerType,
+                    active: selectedTool == CanvasTool.marker &&
+                        inspectionMarkerTypes
+                            .skip(2)
+                            .contains(selectedMarkerType),
+                    markers: inspectionMarkerTypes.skip(2).toList(),
+                    onSelected: onMarkerSelected,
+                  ),
+                ],
+              ),
+              _CollapsibleToolbarSection(
+                label: 'Treatment Markers',
+                children: [
+                  _MarkerPickerButton(
+                    tooltipLabel: 'Treatment Marker',
+                    selectedMarker: selectedMarkerType,
+                    active: selectedTool == CanvasTool.marker &&
+                        treatmentMarkerTypes.contains(selectedMarkerType),
+                    markers: treatmentMarkerTypes,
+                    onSelected: onMarkerSelected,
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
               const Divider(height: 22),
@@ -545,6 +560,7 @@ class _ActionPicker extends StatelessWidget {
           label: groupLabel,
           color: displayedAction.color,
           active: selected,
+          showMenuIndicator: true,
         ),
       ),
     );
@@ -800,6 +816,7 @@ class _MarkerPickerButton extends StatelessWidget {
           label: displayedMarker.shortLabel,
           color: displayedMarker.defaultColor,
           active: active && displayedMarker == selectedMarker,
+          showMenuIndicator: true,
         ),
       ),
     );
@@ -813,12 +830,14 @@ class _PickerFace extends StatelessWidget {
     required this.label,
     required this.color,
     required this.active,
+    this.showMenuIndicator = false,
   });
 
   final IconData icon;
   final String label;
   final Color color;
   final bool active;
+  final bool showMenuIndicator;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -830,26 +849,38 @@ class _PickerFace extends StatelessWidget {
           ),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Stack(
           children: [
-            Icon(icon, size: 23, color: color),
-            const SizedBox(height: 3),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                label,
-                maxLines: 2,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 9,
-                  height: 1.05,
-                  fontWeight: FontWeight.w900,
-                ),
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 23, color: color),
+                  const SizedBox(height: 3),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: Text(
+                      label,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 9,
+                        height: 1.05,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
+            if (showMenuIndicator)
+              Positioned(
+                right: 1,
+                bottom: 0,
+                child: Icon(Icons.arrow_drop_down, size: 15, color: color),
+              ),
           ],
         ),
       );
@@ -889,21 +920,66 @@ class _PlainToolButton extends StatelessWidget {
 }
 
 class _ToolbarHeader extends StatelessWidget {
-  const _ToolbarHeader({required this.label, required this.onCollapse});
+  const _ToolbarHeader({required this.onCollapse});
+
+  final VoidCallback onCollapse;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: 'Hide main toolbar',
+        visualDensity: VisualDensity.compact,
+        onPressed: onCollapse,
+        icon: const Icon(Icons.chevron_left, size: 20),
+      );
+}
+
+class _CollapsibleToolbarSection extends StatefulWidget {
+  const _CollapsibleToolbarSection({
+    required this.label,
+    required this.children,
+  });
 
   final String label;
-  final VoidCallback onCollapse;
+  final List<Widget> children;
+
+  @override
+  State<_CollapsibleToolbarSection> createState() =>
+      _CollapsibleToolbarSectionState();
+}
+
+class _CollapsibleToolbarSectionState
+    extends State<_CollapsibleToolbarSection> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) => Column(
         children: [
-          IconButton(
-            tooltip: 'Hide main toolbar',
-            visualDensity: VisualDensity.compact,
-            onPressed: onCollapse,
-            icon: const Icon(Icons.chevron_left, size: 20),
+          Semantics(
+            button: true,
+            expanded: _expanded,
+            label: '${widget.label} tools',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 7),
+                child: Column(
+                  children: [
+                    _ToolbarGroupLabel(label: widget.label),
+                    Icon(
+                      _expanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      size: 18,
+                      color: const Color(0xFF6D6E71),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
-          _ToolbarGroupLabel(label: label),
+          if (_expanded) ...widget.children,
+          const Divider(height: 10),
         ],
       );
 }

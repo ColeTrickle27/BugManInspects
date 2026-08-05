@@ -554,8 +554,21 @@ void main() {
     expect(find.text('Save'), findsOneWidget);
     expect(find.text('Export'), findsOneWidget);
     expect(find.text('Upload'), findsOneWidget);
-    await tester.tapAt(const Offset(600, 500));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('Upload'));
+    await tester.pump();
+    expect(
+      find.text(
+        'Upload is available when BugMan Graphs is opened through Holloman Ops Brain',
+      ),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(seconds: 2));
+    expect(
+      find.text(
+        'Upload is available when BugMan Graphs is opened through Holloman Ops Brain',
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byTooltip('Canvas options'));
     await tester.pumpAndSettle();
@@ -662,6 +675,7 @@ void main() {
       'Quick Measure\nHold and drag to customize quick tools',
     );
     final quickToolbar = find.byKey(const ValueKey('canvas-quick-toolbar'));
+    await _expandToolbarSection(tester, 'Basic', quickMeasure);
     expect(quickMeasure, findsOneWidget);
     expect(quickToolbar, findsOneWidget);
 
@@ -730,6 +744,11 @@ void main() {
     final moistureTool = find.byTooltip(
       'Moisture\nHold and drag to customize quick tools',
     );
+    await _expandToolbarSection(
+      tester,
+      'Inspection Markers',
+      moistureTool,
+    );
     await tester.ensureVisible(moistureTool);
     await tester.pumpAndSettle();
     await tester.tap(moistureTool.hitTestable());
@@ -784,6 +803,11 @@ void main() {
 
     final photoTool = find.byTooltip(
       'Photo\nHold and drag to customize quick tools',
+    );
+    await _expandToolbarSection(
+      tester,
+      'Inspection Markers',
+      photoTool,
     );
     await tester.ensureVisible(photoTool);
     // The toolbar is independently scrollable; settle after bringing the
@@ -1040,6 +1064,7 @@ void main() {
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
     final picker = find.byTooltip('Treatment Marker: Treatment Area');
+    await _expandToolbarSection(tester, 'Treatment Markers', picker);
     await tester.ensureVisible(picker);
     await tester.pumpAndSettle();
     await tester.tap(picker);
@@ -1178,6 +1203,7 @@ Future<void> _secondaryClick(WidgetTester tester, Offset position) async {
 }
 
 Future<void> _selectStructure(WidgetTester tester, String label) async {
+  await _expandToolbarSection(tester, 'Structures', find.text('MAIN'));
   if (label == 'Main Structure') {
     await tester.ensureVisible(find.text('MAIN'));
     await tester.pumpAndSettle();
@@ -1195,6 +1221,7 @@ Future<void> _selectStructure(WidgetTester tester, String label) async {
 }
 
 Future<void> _selectBasicShape(WidgetTester tester, String label) async {
+  await _expandToolbarSection(tester, 'Basic', find.text('Basic Shapes'));
   await tester.ensureVisible(find.text('Basic Shapes'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Basic Shapes'));
@@ -1204,6 +1231,7 @@ Future<void> _selectBasicShape(WidgetTester tester, String label) async {
 }
 
 Future<void> _selectPropertyTool(WidgetTester tester, String label) async {
+  await _expandToolbarSection(tester, 'Structures', find.text('Property'));
   await tester.ensureVisible(find.text('Property'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Property'));
@@ -1213,11 +1241,28 @@ Future<void> _selectPropertyTool(WidgetTester tester, String label) async {
 }
 
 Future<void> _selectLineTool(WidgetTester tester, String label) async {
+  await _expandToolbarSection(tester, 'Basic', find.text('Lines'));
   await tester.ensureVisible(find.text('Lines'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Lines'));
   await tester.pumpAndSettle();
   await tester.tap(find.text(label));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _expandToolbarSection(
+  WidgetTester tester,
+  String label,
+  Finder visibleChild,
+) async {
+  if (visibleChild.evaluate().isNotEmpty) return;
+  final sectionLabel = find.descendant(
+    of: find.byType(CanvasToolbar),
+    matching: find.text(label),
+  );
+  await tester.ensureVisible(sectionLabel);
+  await tester.pumpAndSettle();
+  await tester.tap(sectionLabel);
   await tester.pumpAndSettle();
 }
 

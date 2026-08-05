@@ -4289,7 +4289,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         photosLocked;
   }
 
-  void _showCanvasMessage(String message) {
+  void _showCanvasMessage(
+    String message, {
+    Duration duration = const Duration(milliseconds: 900),
+  }) {
     setState(() {
       _canvasStatus = message;
     });
@@ -4299,7 +4302,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       ..showSnackBar(
         SnackBar(
           content: Text(message),
-          duration: const Duration(milliseconds: 900),
+          duration: duration,
         ),
       );
   }
@@ -4524,6 +4527,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     if (!_portalService.isAvailable) {
       _showCanvasMessage(
         'Upload is available when BugMan Graphs is opened through Holloman Ops Brain',
+        duration: const Duration(seconds: 6),
       );
       return;
     }
