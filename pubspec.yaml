@@ -12,6 +12,7 @@ dependencies:
   pdf: ^3.13.0
   idb_shim: ^2.6.7
   image: ^4.2.0
+  http: ^1.2.2
   flutter_map: ^8.3.1
   flutter_map_dragmarker: ^8.0.3
   latlong2: ^0.9.1

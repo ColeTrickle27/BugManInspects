@@ -17,6 +17,7 @@ import '../models/trace_geometry.dart';
 import '../models/wall_segment.dart';
 import 'trace_workspace_screen.dart';
 import '../services/export_bounds_calculator.dart';
+import '../services/bugman_portal_service_factory.dart';
 import '../services/graph_export_legend.dart';
 import '../services/graph_image_export.dart';
 import '../services/measurement_format.dart';
@@ -75,6 +76,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       TransformationController();
   late final GraphDocument _document;
   late final GraphRepository _repository;
+  late final _portalService = createBugManPortalService();
   late final GraphPhotoPicker _photoPicker;
   final Map<String, Uint8List> _pendingPhotoBlobs = {};
   final Set<String> _deletedPhotoBlobKeys = {};
@@ -4518,6 +4520,36 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
   }
 
+  Future<void> _uploadDocument() async {
+    if (!_portalService.isAvailable) {
+      _showCanvasMessage(
+        'Upload is available when BugMan Graphs is opened through Holloman Ops Brain',
+      );
+      return;
+    }
+    try {
+      final blobs = <String, Uint8List>{};
+      final blobKeys = <String>{
+        for (final attachment in _document.attachments)
+          if (attachment.blobKey.isNotEmpty) attachment.blobKey,
+        for (final attachment in _document.attachments)
+          if (attachment.thumbnailKey.isNotEmpty) attachment.thumbnailKey,
+      };
+      for (final key in blobKeys) {
+        final bytes =
+            _pendingPhotoBlobs[key] ?? await _repository.loadBlob(key);
+        if (bytes != null) blobs[key] = bytes;
+      }
+      final result = await _portalService.uploadGraph(_document, blobs);
+      if (!mounted) return;
+      setState(() => _canvasStatus = 'Uploaded to Holloman Ops Brain');
+      _showCanvasMessage(result.message);
+    } catch (error) {
+      if (!mounted) return;
+      _showCanvasMessage('Graph could not be uploaded: $error');
+    }
+  }
+
   Future<void> _addPhotoMarker(GraphPoint point) async {
     final source = await showModalBottomSheet<_PhotoSource>(
       context: context,
@@ -4853,20 +4885,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       rotationDegrees: 0,
       preset: _selectedDrawingPreset,
     );
-  }
-
-  void _showActionMessage(String label) {
-    setState(() {
-      _canvasStatus = '$label will be added in the next build step';
-    });
-
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('$label will be added in the next build step.'),
-        ),
-      );
   }
 
   Future<void> _exportGraph() async {
@@ -5860,7 +5878,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onClear: _confirmClearGraph,
                           onSave: _saveDocument,
                           onExport: _exportGraph,
-                          onUpload: () => _showActionMessage('Upload'),
+                          onUpload: _uploadDocument,
                           onZoomIn: () => _zoomBy(1.2),
                           onZoomOut: () => _zoomBy(0.85),
                           onResetZoom: _resetZoom,
