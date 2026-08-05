@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../models/graph_annotation.dart';
@@ -103,7 +105,7 @@ class GraphAnnotationsPainter extends CustomPainter {
     final center = annotation.point.offset;
     final color = annotation.color ?? annotation.markerType.defaultColor;
     final iconSize = 34 * annotation.size;
-    final icon = iconForGraphAnnotation(annotation);
+    final icon = iconForGraphMarker(annotation.markerType);
 
     canvas.save();
     canvas.translate(center.dx, center.dy);
@@ -133,7 +135,12 @@ class GraphAnnotationsPainter extends CustomPainter {
 
     canvas.restore();
     _drawSmallLabel(
-        canvas, center + Offset(0, 36 * annotation.size), annotation.label);
+      canvas,
+      center + Offset(0, 36 * annotation.size),
+      annotation.label,
+      leadingIcon: noticeIconForGraphAnnotation(annotation),
+      leadingIconColor: color,
+    );
   }
 
   void _drawPhotoPin(Canvas canvas, GraphAnnotation annotation) {
@@ -204,6 +211,8 @@ class GraphAnnotationsPainter extends CustomPainter {
     FontStyle fontStyle = FontStyle.normal,
     Color backgroundColor = Colors.white,
     Color borderColor = const Color(0xFFD1CCBF),
+    IconData? leadingIcon,
+    Color? leadingIconColor,
   }) {
     final textPainter = TextPainter(
       text: TextSpan(
@@ -217,11 +226,33 @@ class GraphAnnotationsPainter extends CustomPainter {
       ),
       textDirection: TextDirection.ltr,
     )..layout(maxWidth: 150);
+    final iconPainter = leadingIcon == null
+        ? null
+        : (TextPainter(
+            text: TextSpan(
+              text: String.fromCharCode(leadingIcon.codePoint),
+              style: TextStyle(
+                inherit: false,
+                color: leadingIconColor ?? textColor,
+                fontSize: fontSize + 2,
+                fontFamily: leadingIcon.fontFamily,
+                package: leadingIcon.fontPackage,
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+          )..layout());
+    final iconSpacing = iconPainter == null ? 0.0 : 5.0;
+    final contentWidth =
+        textPainter.width + (iconPainter?.width ?? 0) + iconSpacing;
+    final contentHeight = math.max(
+      textPainter.height,
+      iconPainter?.height ?? 0,
+    );
 
     final labelRect = Rect.fromCenter(
       center: center,
-      width: textPainter.width + 16,
-      height: textPainter.height + 8,
+      width: contentWidth + 16,
+      height: contentHeight + 8,
     );
     final labelRRect = RRect.fromRectAndRadius(
       labelRect,
@@ -236,10 +267,20 @@ class GraphAnnotationsPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1,
     );
+    final contentLeft = center.dx - (contentWidth / 2);
+    if (iconPainter != null) {
+      iconPainter.paint(
+        canvas,
+        Offset(
+          contentLeft,
+          center.dy - (iconPainter.height / 2),
+        ),
+      );
+    }
     textPainter.paint(
       canvas,
       Offset(
-        center.dx - (textPainter.width / 2),
+        contentLeft + (iconPainter?.width ?? 0) + iconSpacing,
         center.dy - (textPainter.height / 2),
       ),
     );

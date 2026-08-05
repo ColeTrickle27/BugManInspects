@@ -560,7 +560,7 @@ void main() {
     await tester.tap(find.byTooltip('Canvas options'));
     await tester.pumpAndSettle();
     expect(find.text('Snap to grid'), findsOneWidget);
-    expect(find.text('Snap to objects'), findsOneWidget);
+    expect(find.text('Snap to objects'), findsNothing);
     expect(find.text('10:1'), findsOneWidget);
     expect(find.text('20:1'), findsNothing);
   });

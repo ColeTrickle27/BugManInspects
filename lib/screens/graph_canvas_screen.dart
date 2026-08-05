@@ -92,7 +92,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   _Selection? _selection;
   bool _gridVisible = true;
   bool _snapToGrid = true;
-  bool _snapToObjects = true;
+  static const bool _snapToObjects = false;
   _SidePanelMode? _sidePanelMode;
   bool _layersCollapsed = true;
   bool _mainToolbarCollapsed = false;
@@ -5016,14 +5016,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     });
   }
 
-  void _toggleSnapToObjects() {
-    setState(() {
-      _snapToObjects = !_snapToObjects;
-      _canvasStatus =
-          _snapToObjects ? 'Snap to objects on' : 'Snap to objects off';
-    });
-  }
-
   void _setScaleLabel(String value) {
     final requestedScale = double.tryParse(value.split(':').first) ?? 1.0;
     final currentScale = _transformationController.value.getMaxScaleOnAxis();
@@ -5876,8 +5868,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onToggleGrid: _toggleGridVisible,
                           snapToGrid: _snapToGrid,
                           onToggleSnapToGrid: _toggleSnapToGrid,
-                          snapToObjects: _snapToObjects,
-                          onToggleSnapToObjects: _toggleSnapToObjects,
                           scaleLabel: _scaleLabel,
                           onScaleChanged: _setScaleLabel,
                         ),
@@ -6008,8 +5998,6 @@ class _TopEditorToolbar extends StatelessWidget {
     required this.onToggleGrid,
     required this.snapToGrid,
     required this.onToggleSnapToGrid,
-    required this.snapToObjects,
-    required this.onToggleSnapToObjects,
     required this.scaleLabel,
     required this.onScaleChanged,
   });
@@ -6028,8 +6016,6 @@ class _TopEditorToolbar extends StatelessWidget {
   final VoidCallback onToggleGrid;
   final bool snapToGrid;
   final VoidCallback onToggleSnapToGrid;
-  final bool snapToObjects;
-  final VoidCallback onToggleSnapToObjects;
   final String scaleLabel;
   final ValueChanged<String> onScaleChanged;
 
@@ -6132,8 +6118,6 @@ class _TopEditorToolbar extends StatelessWidget {
                       onToggleGrid();
                     case _EditorOptionAction.snapGrid:
                       onToggleSnapToGrid();
-                    case _EditorOptionAction.snapObjects:
-                      onToggleSnapToObjects();
                     case _EditorOptionAction.scale1:
                       onScaleChanged('1:1');
                     case _EditorOptionAction.scale2:
@@ -6156,11 +6140,6 @@ class _TopEditorToolbar extends StatelessWidget {
                     value: _EditorOptionAction.snapGrid,
                     checked: snapToGrid,
                     child: const Text('Snap to grid'),
-                  ),
-                  CheckedPopupMenuItem(
-                    value: _EditorOptionAction.snapObjects,
-                    checked: snapToObjects,
-                    child: const Text('Snap to objects'),
                   ),
                   const PopupMenuDivider(),
                   for (final entry in const {
@@ -7998,7 +7977,6 @@ enum _EditorFileAction { save, export, upload }
 enum _EditorOptionAction {
   grid,
   snapGrid,
-  snapObjects,
   scale1,
   scale2,
   scale3,

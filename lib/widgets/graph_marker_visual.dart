@@ -43,7 +43,7 @@ IconData iconForGraphMarker(GraphMarkerType marker) => switch (marker.symbol) {
       GraphMarkerSymbol.generic => Icons.place_outlined,
     };
 
-IconData iconForGraphAnnotation(GraphAnnotation annotation) {
+IconData? noticeIconForGraphAnnotation(GraphAnnotation annotation) {
   if (annotation.markerType == GraphMarkerType.moisture) {
     if (annotation.note.contains('Immediate Attention Needed')) {
       return Icons.dangerous_outlined;
@@ -53,5 +53,5 @@ IconData iconForGraphAnnotation(GraphAnnotation annotation) {
     }
   }
 
-  return iconForGraphMarker(annotation.markerType);
+  return null;
 }
