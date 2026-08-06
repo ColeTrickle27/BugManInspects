@@ -193,6 +193,53 @@ void main() {
     expect(segments.first.measurementLabel, '1 lf');
   });
 
+  test('export measurements include every drawn shape and line', () {
+    const areaSegments = [
+      WallSegment(
+        start: GraphPoint(x: 0, y: 0),
+        end: GraphPoint(x: 24, y: 0),
+      ),
+      WallSegment(
+        start: GraphPoint(x: 24, y: 0),
+        end: GraphPoint(x: 24, y: 24),
+      ),
+      WallSegment(
+        start: GraphPoint(x: 24, y: 24),
+        end: GraphPoint(x: 0, y: 24),
+      ),
+      WallSegment(
+        start: GraphPoint(x: 0, y: 24),
+        end: GraphPoint(x: 0, y: 0),
+      ),
+    ];
+    const lawn = GraphShape(
+      name: 'Lawn',
+      segmentIndexes: [0, 1, 2, 3],
+      fillColor: null,
+      fillOpacity: 0,
+      borderColor: Colors.green,
+      borderWidth: 2,
+      pattern: GraphShapePattern.none,
+      closed: true,
+      rotationDegrees: 0,
+    );
+    const fence = GraphShape(
+      name: 'Fence',
+      segmentIndexes: [0],
+      fillColor: null,
+      fillOpacity: 0,
+      borderColor: Colors.brown,
+      borderWidth: 2,
+      pattern: GraphShapePattern.none,
+      closed: false,
+      rotationDegrees: 0,
+      preset: GraphDrawingPreset.fenceLine,
+    );
+
+    expect(shapeExportMeasurements(lawn, areaSegments), ['1 sf', '4 lf']);
+    expect(shapeExportMeasurements(fence, areaSegments), ['4 lf']);
+  });
+
   test('completed fence uses its saved X-mark segment styling', () {
     const fence = GraphShape(
       name: 'Fence Line',

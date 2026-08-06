@@ -143,17 +143,20 @@ class GraphAnnotationsPainter extends CustomPainter {
     final isTreatment = isTreatmentMarker(annotation.markerType);
     _drawSmallLabel(
       canvas,
-      center + Offset(0, 36 * annotation.size),
+      center + Offset(0, 28 * annotation.size),
       annotation.label,
       leadingIcon: noticeIconForGraphAnnotation(annotation),
       leadingIconColor: color,
-      textColor: isUtility ? Colors.black : const Color(0xFF6D6E71),
+      textColor: isUtility ? Colors.black : const Color(0xFFE6E6E6),
+      fontWeight: isUtility ? FontWeight.w700 : FontWeight.w800,
       backgroundColor: isUtility
           ? Colors.transparent
           : isTreatment
               ? const Color(0xFF245BDB)
               : const Color(0xFFCC2000),
       borderColor: isUtility ? Colors.transparent : Colors.black,
+      horizontalPadding: 6,
+      verticalPadding: 2,
     );
   }
 
@@ -296,6 +299,8 @@ class GraphAnnotationsPainter extends CustomPainter {
     Color borderColor = const Color(0xFFD1CCBF),
     IconData? leadingIcon,
     Color? leadingIconColor,
+    double horizontalPadding = 8,
+    double verticalPadding = 4,
   }) {
     final textPainter = TextPainter(
       text: TextSpan(
@@ -334,8 +339,8 @@ class GraphAnnotationsPainter extends CustomPainter {
 
     final labelRect = Rect.fromCenter(
       center: center,
-      width: contentWidth + 16,
-      height: contentHeight + 8,
+      width: contentWidth + (horizontalPadding * 2),
+      height: contentHeight + (verticalPadding * 2),
     );
     final labelRRect = RRect.fromRectAndRadius(
       labelRect,

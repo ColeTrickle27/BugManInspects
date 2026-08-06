@@ -168,9 +168,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   double _defaultArrowWidth = 5;
   LinePattern _defaultArrowPattern = LinePattern.solid;
   double _defaultTextFontSize = 20.4;
-  Color _defaultTextColor = Colors.black;
-  Color _defaultTextBackground = const Color(0xFFCC2000);
+  Color _defaultTextColor = const Color(0xFFCC2000);
+  Color _defaultTextBackground = const Color(0xFFFFEB00);
   Color _defaultTextBorder = Colors.black;
+  bool _defaultTextBold = true;
   Color _defaultFreehandColor = const Color(0xFF214D38);
   double _defaultFreehandWidth = 4;
   double _defaultFreehandOpacity = 0.95;
@@ -709,24 +710,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   void _handlePointerHover(PointerHoverEvent event) {
     final sceneOffset = _transformationController.toScene(event.localPosition);
-
-    final treatmentCalloutTip = _treatmentCalloutTip;
-    if (treatmentCalloutTip != null) {
-      setState(() {
-        _treatmentCalloutTip = null;
-        _treatmentCalloutBox = null;
-      });
-      if (_isInsideCanvas(sceneOffset) && _pointerTravel > _tapMovementLimit) {
-        _completeTreatmentCallout(treatmentCalloutTip, sceneOffset);
-      } else {
-        _showCanvasMessage('Drag outward to place a Treatment Note callout');
-      }
-      if (_activePointerCount == 0) {
-        _multiTouchPanning = false;
-        _resetPointerGesture();
-      }
-      return;
-    }
     if (_isInsideCanvas(sceneOffset)) {
       if (_selectedTool != CanvasTool.select) {
         if (_hoverSelection != null) {
@@ -772,6 +755,24 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
 
     final sceneOffset = _transformationController.toScene(event.localPosition);
+
+    final treatmentCalloutTip = _treatmentCalloutTip;
+    if (treatmentCalloutTip != null) {
+      setState(() {
+        _treatmentCalloutTip = null;
+        _treatmentCalloutBox = null;
+      });
+      if (_isInsideCanvas(sceneOffset) && _pointerTravel > _tapMovementLimit) {
+        _completeTreatmentCallout(treatmentCalloutTip, sceneOffset);
+      } else {
+        _showCanvasMessage('Drag outward to place a Treatment Note callout');
+      }
+      if (_activePointerCount == 0) {
+        _multiTouchPanning = false;
+        _resetPointerGesture();
+      }
+      return;
+    }
 
     if (_pointerDownHitSelection != null) {
       if (wasSinglePointerTap && _isDoubleClickNearLastTap(sceneOffset)) {
@@ -3221,6 +3222,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       point: GraphPoint.fromOffset(canvasOffset),
       label: text,
       fontSize: _defaultTextFontSize,
+      bold: _defaultTextBold,
       textColor: _defaultTextColor,
       backgroundColor: _defaultTextBackground,
       borderColor: _defaultTextBorder,
@@ -5162,16 +5164,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         for (final index in shape.segmentIndexes)
           if (index >= 0 && index < _wallSegments.length) _wallSegments[index],
       ];
-      final measurement = shapeMeasurementSummary(shape, segments);
-      if (measurement.isEmpty) continue;
+      final measurements = shapeExportMeasurements(shape, segments);
+      if (measurements.isEmpty) continue;
       summaries.add(
         GraphMeasurementSummary(
           label: shape.text.trim().isEmpty ? shape.name : shape.text,
-          measurements: measurement
-              .split('â€¢')
-              .map((value) => value.trim())
-              .where((value) => value.isNotEmpty)
-              .toList(growable: false),
+          measurements: measurements,
         ),
       );
     }
@@ -5445,6 +5443,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     setState(() {
       _defaultTextFontSize = annotation.fontSize;
+      _defaultTextBold = annotation.bold;
       _defaultTextColor = annotation.textColor;
       _defaultTextBackground = annotation.backgroundColor;
       _defaultTextBorder = annotation.borderColor;

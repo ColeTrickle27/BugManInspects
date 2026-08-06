@@ -1176,6 +1176,35 @@ void main() {
     expect(find.text('Line Properties'), findsNothing);
   });
 
+  testWidgets('Treatment Note callout completes when its drag is released',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    final treatmentNote = find.byTooltip('Treatment Note');
+    await _expandToolbarSection(tester, 'Treatment Markers', treatmentNote);
+    await tester.tap(treatmentNote);
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(const Offset(320, 260));
+    await gesture.moveTo(const Offset(470, 340));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit Treatment Note'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'Treat foundation wall');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(_annotationCount(tester), 1);
+    expect(
+      (_graphOverlayPainter(tester).annotations as List).single.label,
+      'Treat foundation wall',
+    );
+  });
+
   testWidgets('right-click removes only the latest unfinished line point',
       (tester) async {
     tester.view.devicePixelRatio = 1;

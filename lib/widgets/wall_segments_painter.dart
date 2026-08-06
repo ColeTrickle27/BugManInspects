@@ -362,31 +362,13 @@ class WallSegmentsPainter extends CustomPainter {
       text: TextSpan(
         text: segment.measurementLabel,
         style: const TextStyle(
-          color: Color(0xFF1C2B22),
+          color: Colors.black,
           fontSize: 15,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w800,
         ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-
-    final labelRect = Rect.fromCenter(
-      center: labelCenter,
-      width: textPainter.width + 16,
-      height: textPainter.height + 8,
-    );
-    final labelRRect = RRect.fromRectAndRadius(
-      labelRect,
-      const Radius.circular(5),
-    );
-    final labelBackgroundPaint = Paint()..color = Colors.white;
-    final labelBorderPaint = Paint()
-      ..color = const Color(0xFFD1CCBF)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-
-    canvas.drawRRect(labelRRect, labelBackgroundPaint);
-    canvas.drawRRect(labelRRect, labelBorderPaint);
     textPainter.paint(
       canvas,
       Offset(

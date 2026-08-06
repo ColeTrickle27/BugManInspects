@@ -48,6 +48,32 @@ String shapeMeasurementSummary(
   return '';
 }
 
+/// Measurements used by exports. Unlike the on-canvas summary, this includes
+/// every drawn shape or line that has usable geometry.
+List<String> shapeExportMeasurements(
+  GraphShape shape,
+  List<WallSegment> shapeSegments,
+) {
+  if (shapeSegments.isEmpty) {
+    return const [];
+  }
+
+  final measurements = <String>[];
+  if (shape.closed && shapeSegments.length >= 3) {
+    measurements.add(
+      MeasurementFormat.squareFeet(_shapeAreaSquareFeet(shape, shapeSegments)),
+    );
+  }
+  final linearFeet = shapeSegments.fold<double>(
+    0,
+    (total, segment) => total + segment.lengthFeet,
+  );
+  if (linearFeet > 0) {
+    measurements.add(MeasurementFormat.linearFeet(linearFeet));
+  }
+  return measurements;
+}
+
 double _shapeAreaSquareFeet(
   GraphShape shape,
   List<WallSegment> shapeSegments,
@@ -185,7 +211,7 @@ class GraphShapesPainter extends CustomPainter {
       normal = -normal;
     }
     return midpoint +
-        (normal * math.min(42, math.max(22, bounds.shortestSide / 8)));
+        (normal * math.min(96, math.max(72, bounds.shortestSide / 3)));
   }
 
   void _drawShapeBorder(Canvas canvas, GraphShape shape, Path path) {
@@ -453,7 +479,7 @@ class GraphShapesPainter extends CustomPainter {
 
     canvas.drawRRect(
       labelRRect,
-      Paint()..color = const Color(0xFF6D6E71),
+      Paint()..color = const Color(0xFFE6E6E6),
     );
     canvas.drawRRect(
       labelRRect,
