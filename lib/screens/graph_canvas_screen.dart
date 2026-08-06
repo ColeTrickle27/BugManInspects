@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../editor/editor_interaction_controller.dart';
 import '../models/graph_annotation.dart';
@@ -18,6 +19,7 @@ import '../models/wall_segment.dart';
 import 'trace_workspace_screen.dart';
 import '../services/export_bounds_calculator.dart';
 import '../services/bugman_portal_service_factory.dart';
+import '../services/bugman_portal_service.dart';
 import '../services/graph_export_legend.dart';
 import '../services/graph_image_export.dart';
 import '../services/measurement_format.dart';
@@ -43,6 +45,8 @@ class GraphCanvasScreen extends StatefulWidget {
     this.document,
     this.repository,
     this.photoPicker,
+    this.portalService,
+    this.portalKey,
     super.key,
   }) : assert(job != null || document != null);
 
@@ -52,6 +56,8 @@ class GraphCanvasScreen extends StatefulWidget {
   final GraphDocument? document;
   final GraphRepository? repository;
   final GraphPhotoPicker? photoPicker;
+  final BugManPortalService? portalService;
+  final String? portalKey;
 
   @override
   State<GraphCanvasScreen> createState() => _GraphCanvasScreenState();
@@ -76,7 +82,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       TransformationController();
   late final GraphDocument _document;
   late final GraphRepository _repository;
-  late final _portalService = createBugManPortalService();
+  late final BugManPortalService _portalService;
+  String? _portalKey;
   late final GraphPhotoPicker _photoPicker;
   final Map<String, Uint8List> _pendingPhotoBlobs = {};
   final Set<String> _deletedPhotoBlobKeys = {};
@@ -200,6 +207,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _document = widget.document ?? GraphDocument.forJob(widget.job!);
     _repository = widget.repository ?? MemoryGraphRepository();
     _photoPicker = widget.photoPicker ?? createGraphPhotoPicker();
+    _portalService = widget.portalService ?? createBugManPortalService();
+    _portalKey = widget.portalKey;
     _interaction = EditorInteractionController();
     _document.addListener(_handleDocumentChanged);
   }
@@ -4504,19 +4513,32 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       if (retainedAttachments.length != _document.attachments.length) {
         _document.replaceAttachments(retainedAttachments);
       }
+      final portalBlobs = _portalService.isAvailable
+          ? await _collectPortalBlobs()
+          : const <String, Uint8List>{};
       await _repository.saveGraph(
         _document,
         blobs: _pendingPhotoBlobs,
         deletedBlobKeys: _deletedPhotoBlobKeys,
       );
+      final portalResult = _portalService.isAvailable
+          ? await _portalService.saveGraph(
+              _document,
+              portalBlobs,
+              existingKey: _portalKey,
+            )
+          : null;
       if (!mounted) return;
       setState(() {
+        if (portalResult != null) _portalKey = portalResult.key;
         _document.markClean();
         _pendingPhotoBlobs.clear();
         _deletedPhotoBlobKeys.clear();
-        _canvasStatus = 'Saved on this device';
+        _canvasStatus = portalResult?.message ?? 'Saved on this device';
       });
-      _showCanvasMessage('Graph saved on this device');
+      _showCanvasMessage(
+        portalResult?.message ?? 'Graph saved on this device',
+      );
     } catch (error) {
       if (!mounted) return;
       _showCanvasMessage('Graph could not be saved: $error');
@@ -4532,26 +4554,33 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return;
     }
     try {
-      final blobs = <String, Uint8List>{};
-      final blobKeys = <String>{
-        for (final attachment in _document.attachments)
-          if (attachment.blobKey.isNotEmpty) attachment.blobKey,
-        for (final attachment in _document.attachments)
-          if (attachment.thumbnailKey.isNotEmpty) attachment.thumbnailKey,
-      };
-      for (final key in blobKeys) {
-        final bytes =
-            _pendingPhotoBlobs[key] ?? await _repository.loadBlob(key);
-        if (bytes != null) blobs[key] = bytes;
-      }
+      final blobs = await _collectPortalBlobs();
       final result = await _portalService.uploadGraph(_document, blobs);
       if (!mounted) return;
-      setState(() => _canvasStatus = 'Uploaded to Holloman Ops Brain');
+      setState(() {
+        _portalKey = result.key;
+        _canvasStatus = 'Uploaded to Holloman Ops Brain';
+      });
       _showCanvasMessage(result.message);
     } catch (error) {
       if (!mounted) return;
       _showCanvasMessage('Graph could not be uploaded: $error');
     }
+  }
+
+  Future<Map<String, Uint8List>> _collectPortalBlobs() async {
+    final blobs = <String, Uint8List>{};
+    final blobKeys = <String>{
+      for (final attachment in _document.attachments)
+        if (attachment.blobKey.isNotEmpty) attachment.blobKey,
+      for (final attachment in _document.attachments)
+        if (attachment.thumbnailKey.isNotEmpty) attachment.thumbnailKey,
+    };
+    for (final key in blobKeys) {
+      final bytes = _pendingPhotoBlobs[key] ?? await _repository.loadBlob(key);
+      if (bytes != null) blobs[key] = bytes;
+    }
+    return blobs;
   }
 
   Future<void> _addPhotoMarker(GraphPoint point) async {
@@ -5678,7 +5707,25 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     };
   }
 
-  @override
+  Future<void> _showAboutDialog() async {
+  final packageInfo = await PackageInfo.fromPlatform();
+
+  if (!mounted) return;
+
+  showAboutDialog(
+    context: context,
+    applicationName: 'BugMan Graphs',
+    applicationVersion:
+        '${packageInfo.version}+${packageInfo.buildNumber}',
+    applicationLegalese: '© 2026 Holloman Exterminators',
+    children: const [
+      SizedBox(height: 12),
+      Text('Environment: Production'),
+      Text('Hosted on Cloudflare Pages'),
+    ],
+  );
+}
+@override
   Widget build(BuildContext context) {
     const sidePanelWidth = 268.0;
     const canvasRightInset = 12.0;
@@ -5690,11 +5737,27 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 40,
-        title: Text(
-          _document.isDirty ? '$documentTitle • Unsaved' : documentTitle,
+  toolbarHeight: 40,
+  title: Text(
+    _document.isDirty ? '$documentTitle • Unsaved' : documentTitle,
+  ),
+
+  actions: [
+    PopupMenuButton<String>(
+      onSelected: (value) {
+        if (value == 'about') {
+          _showAboutDialog();
+        }
+      },
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: 'about',
+          child: Text('About BugMan Graphs'),
         ),
-      ),
+      ],
+    ),
+  ],
+),
       body: Focus(
         focusNode: _editorFocusNode,
         autofocus: true,

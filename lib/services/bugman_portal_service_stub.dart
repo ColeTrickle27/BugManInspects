@@ -14,6 +14,14 @@ class UnavailableBugManPortalService implements BugManPortalService {
       Future.error(UnsupportedError('Holloman Ops Brain is unavailable.'));
 
   @override
+  Future<PortalUploadResult> saveGraph(
+    GraphDocument document,
+    Map<String, Uint8List> blobs, {
+    String? existingKey,
+  }) =>
+      Future.error(UnsupportedError('Holloman Ops Brain is unavailable.'));
+
+  @override
   Future<PortalUploadResult> uploadGraph(
     GraphDocument document,
     Map<String, Uint8List> blobs,

@@ -70,6 +70,7 @@ class _BugManGraphsAppState extends State<BugManGraphsApp> {
                 return GraphCanvasScreen(
                   document: snapshot.data!,
                   repository: _repository,
+                  portalKey: _portalKey,
                 );
               },
             ),

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:http/browser_client.dart';
 
 import '../models/graph_document.dart';
 import 'bugman_portal_service.dart';
@@ -9,16 +10,54 @@ import 'bugman_portal_service.dart';
 BugManPortalService createPortalService() => HttpBugManPortalService();
 
 class HttpBugManPortalService implements BugManPortalService {
+  static const _opsBrainOrigin = 'https://ops.holloman-ext.com';
+  static const _cloudflareHosts = {
+    'graphs.holloman-ext.com',
+    'bugman-graphs.pages.dev',
+  };
+
+  late final BrowserClient _client = BrowserClient()..withCredentials = true;
+
+  String get _apiOrigin => Uri.base.path.startsWith('/bugman-graphs/')
+      ? Uri.base.origin
+      : _opsBrainOrigin;
+
   @override
-  bool get isAvailable => Uri.base.path.startsWith('/bugman-graphs/');
+  bool get isAvailable =>
+      Uri.base.path.startsWith('/bugman-graphs/') ||
+      _cloudflareHosts.contains(Uri.base.host);
+
+  @override
+  Future<PortalUploadResult> saveGraph(
+    GraphDocument document,
+    Map<String, Uint8List> blobs, {
+    String? existingKey,
+  }) =>
+      _sendGraph(
+        '/api/bugman-graphs/save',
+        document,
+        blobs,
+        existingKey: existingKey,
+      );
 
   @override
   Future<PortalUploadResult> uploadGraph(
     GraphDocument document,
     Map<String, Uint8List> blobs,
-  ) async {
-    final response = await http.post(
-      Uri.parse('/api/bugman-graphs/upload'),
+  ) =>
+      _sendGraph('/api/bugman-graphs/upload', document, blobs);
+
+  Future<PortalUploadResult> _sendGraph(
+    String path,
+    GraphDocument document,
+    Map<String, Uint8List> blobs, {
+    String? existingKey,
+  }) async {
+    final uri = Uri.parse('$_apiOrigin$path').replace(
+      queryParameters: existingKey == null ? null : {'key': existingKey},
+    );
+    final response = await _client.post(
+      uri,
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
         'type': 'bugman-graph',
@@ -39,9 +78,9 @@ class HttpBugManPortalService implements BugManPortalService {
 
   @override
   Future<PortalGraphPackage> loadGraph(String key) async {
-    final uri = Uri.parse('/api/bugman-graphs/load')
+    final uri = Uri.parse('$_apiOrigin/api/bugman-graphs/load')
         .replace(queryParameters: {'key': key});
-    final response = await http.get(uri);
+    final response = await _client.get(uri);
     final payload = _decodeResponse(response);
     final graph = payload['graph'];
     if (graph is! Map || graph['document'] is! Map) {

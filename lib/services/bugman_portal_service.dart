@@ -21,6 +21,12 @@ class PortalUploadResult {
 abstract class BugManPortalService {
   bool get isAvailable;
 
+  Future<PortalUploadResult> saveGraph(
+    GraphDocument document,
+    Map<String, Uint8List> blobs, {
+    String? existingKey,
+  });
+
   Future<PortalUploadResult> uploadGraph(
     GraphDocument document,
     Map<String, Uint8List> blobs,

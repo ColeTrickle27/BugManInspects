@@ -12,6 +12,7 @@ import 'package:bugman_graphs/screens/graph_canvas_screen.dart';
 import 'package:bugman_graphs/screens/home_screen.dart';
 import 'package:bugman_graphs/screens/new_job_screen.dart';
 import 'package:bugman_graphs/services/graph_photo_service.dart';
+import 'package:bugman_graphs/services/bugman_portal_service.dart';
 import 'package:bugman_graphs/services/graph_repository_stub.dart';
 import 'package:bugman_graphs/theme/app_theme.dart';
 import 'package:bugman_graphs/widgets/canvas_toolbar.dart';
@@ -576,6 +577,48 @@ void main() {
     expect(find.text('Snap to objects'), findsNothing);
     expect(find.text('10:1'), findsOneWidget);
     expect(find.text('20:1'), findsNothing);
+  });
+
+  testWidgets(
+      'Save updates one Ops Brain graph key and Upload starts a new copy',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(910, 794);
+    addTearDown(tester.view.reset);
+    final portal = _FakeBugManPortalService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GraphCanvasScreen(
+          job: Job(
+            customerName: 'Save Test',
+            serviceAddress: '',
+            pestPacLocationNumber: '',
+            pestPacBillToNumber: '',
+            serviceType: 'Inspection',
+            createdBy: 'Widget Test',
+            createdDate: DateTime(2026, 8, 6),
+          ),
+          portalService: portal,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Future<void> chooseFileAction(String label) async {
+      await tester.tap(find.byTooltip('File actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    await chooseFileAction('Save');
+    await chooseFileAction('Save');
+    expect(portal.saveExistingKeys, [null, portal.savedKey]);
+
+    await chooseFileAction('Upload');
+    await chooseFileAction('Save');
+    expect(portal.uploadCount, 1);
+    expect(portal.saveExistingKeys.last, portal.uploadedKey);
   });
 
   testWidgets('scale options update the canvas transformation', (tester) async {
@@ -1277,4 +1320,43 @@ class _FakePhotoPicker implements GraphPhotoPicker {
 
   @override
   Future<List<PickedGraphPhoto>> chooseMultiple() async => photos;
+}
+
+class _FakeBugManPortalService implements BugManPortalService {
+  final savedKey = 'company/BugMan Graphs Uploads/saved.bgraph';
+  final uploadedKey = 'company/BugMan Graphs Uploads/uploaded.bgraph';
+  final saveExistingKeys = <String?>[];
+  int uploadCount = 0;
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<PortalGraphPackage> loadGraph(String key) =>
+      throw UnimplementedError();
+
+  @override
+  Future<PortalUploadResult> saveGraph(
+    GraphDocument document,
+    Map<String, Uint8List> blobs, {
+    String? existingKey,
+  }) async {
+    saveExistingKeys.add(existingKey);
+    return PortalUploadResult(
+      key: existingKey ?? savedKey,
+      message: 'Graph saved to Ops Brain.',
+    );
+  }
+
+  @override
+  Future<PortalUploadResult> uploadGraph(
+    GraphDocument document,
+    Map<String, Uint8List> blobs,
+  ) async {
+    uploadCount += 1;
+    return PortalUploadResult(
+      key: uploadedKey,
+      message: 'Graph uploaded to Ops Brain.',
+    );
+  }
 }
