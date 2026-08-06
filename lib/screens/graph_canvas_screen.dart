@@ -4555,7 +4555,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
     try {
       final blobs = await _collectPortalBlobs();
-      final result = await _portalService.uploadGraph(_document, blobs);
+      final result = await _portalService.saveGraph(
+        _document,
+        blobs,
+        existingKey: _portalKey,
+      );
       if (!mounted) return;
       setState(() {
         _portalKey = result.key;

@@ -580,7 +580,7 @@ void main() {
   });
 
   testWidgets(
-      'Save updates one Ops Brain graph key and Upload starts a new copy',
+      'Save and Upload update the same Ops Brain graph key',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(910, 794);
@@ -617,8 +617,58 @@ void main() {
 
     await chooseFileAction('Upload');
     await chooseFileAction('Save');
-    expect(portal.uploadCount, 1);
-    expect(portal.saveExistingKeys.last, portal.uploadedKey);
+    expect(portal.uploadCount, 0);
+    expect(portal.saveExistingKeys,
+        [null, portal.savedKey, portal.savedKey, portal.savedKey]);
+  });
+
+  testWidgets('Upload creates once and an opened graph keeps its Ops Brain key',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(910, 794);
+    addTearDown(tester.view.reset);
+    final portal = _FakeBugManPortalService();
+    final job = Job(
+      customerName: 'Existing Graph Test',
+      serviceAddress: '',
+      pestPacLocationNumber: '',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 8, 6),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: GraphCanvasScreen(
+        key: const ValueKey('new-graph'),
+        job: job,
+        portalService: portal,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('File actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Upload'));
+    await tester.pumpAndSettle();
+    expect(portal.saveExistingKeys, [null]);
+
+    const originalKey =
+        'company/BugMan Graphs Uploads/original-existing-graph.bgraph';
+    await tester.pumpWidget(MaterialApp(
+      home: GraphCanvasScreen(
+        key: const ValueKey('opened-graph'),
+        document: GraphDocument.forJob(job),
+        portalService: portal,
+        portalKey: originalKey,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('File actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(portal.saveExistingKeys.last, originalKey);
+    expect(portal.uploadCount, 0);
   });
 
   testWidgets('scale options update the canvas transformation', (tester) async {
