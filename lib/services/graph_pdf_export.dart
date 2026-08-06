@@ -17,6 +17,16 @@ class GraphPdfPhoto {
   final Uint8List bytes;
 }
 
+class GraphMeasurementSummary {
+  const GraphMeasurementSummary({
+    required this.label,
+    required this.measurements,
+  });
+
+  final String label;
+  final List<String> measurements;
+}
+
 class GraphPdfExport {
   const GraphPdfExport._();
 
@@ -24,13 +34,16 @@ class GraphPdfExport {
     required Uint8List graphPng,
     required String title,
     List<GraphLegendSection> legend = const [],
+    List<GraphMeasurementSummary> measurementSummary = const [],
     List<GraphPdfPhoto> photos = const [],
+    Uint8List? brandingLogo,
   }) async {
     final document = pw.Document(
       title: title,
       creator: 'BugMan Graphs',
     );
     final image = pw.MemoryImage(graphPng);
+    final logo = brandingLogo == null ? null : pw.MemoryImage(brandingLogo);
     document.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.letter.landscape,
@@ -38,62 +51,121 @@ class GraphPdfExport {
         build: (context) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Text(
-              title,
-              style: const pw.TextStyle(
-                fontSize: 16,
-                fontWeight: pw.FontWeight.bold,
-              ),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                if (logo != null)
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.only(right: 12),
+                    child: pw.Image(logo, height: 30, fit: pw.BoxFit.contain),
+                  ),
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        'Holloman Exterminators',
+                        style: const pw.TextStyle(
+                          fontSize: 12,
+                          color: PdfColors.red800,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.Text(
+                        title,
+                        style: const pw.TextStyle(
+                          fontSize: 16,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                pw.Text(
+                  'Inspection Graph',
+                  style:
+                      const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
+                ),
+              ],
             ),
-            pw.SizedBox(height: 12),
+            pw.SizedBox(height: 8),
+            pw.Container(height: 1, color: PdfColors.red800),
+            pw.SizedBox(height: 8),
             pw.Expanded(
               child: pw.Center(
                 child: pw.Image(image, fit: pw.BoxFit.contain),
               ),
             ),
-            if (legend.isNotEmpty) ...[
-              pw.SizedBox(height: 10),
-              for (final section in legend) ...[
-                pw.Text(
-                  section.title,
-                  style: const pw.TextStyle(
-                    fontSize: 11,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 3),
-                pw.Wrap(
-                  spacing: 12,
-                  runSpacing: 4,
+            if (legend.isNotEmpty || measurementSummary.isNotEmpty)
+              pw.Container(
+                padding: const pw.EdgeInsets.only(top: 8),
+                child: pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    for (final entry in section.entries)
-                      pw.SizedBox(
-                        width: 155,
-                        child: pw.Row(
-                          children: [
-                            pw.Container(
-                              width: 9,
-                              height: 9,
-                              decoration: pw.BoxDecoration(
-                                color: PdfColor.fromInt(entry.color.toARGB32()),
-                                shape: pw.BoxShape.circle,
+                    if (measurementSummary.isNotEmpty)
+                      pw.Expanded(
+                        child: _section(
+                          'Measurement Summary',
+                          measurementSummary
+                              .map((item) => pw.Padding(
+                                    padding:
+                                        const pw.EdgeInsets.only(bottom: 2),
+                                    child: pw.RichText(
+                                      text: pw.TextSpan(
+                                        text: '${item.label}: ',
+                                        style: const pw.TextStyle(
+                                            fontSize: 8,
+                                            fontWeight: pw.FontWeight.bold),
+                                        children: [
+                                          pw.TextSpan(
+                                              text:
+                                                  item.measurements.join('  '),
+                                              style: const pw.TextStyle(
+                                                  fontWeight:
+                                                      pw.FontWeight.normal))
+                                        ],
+                                      ),
+                                    ),
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                    if (measurementSummary.isNotEmpty && legend.isNotEmpty)
+                      pw.SizedBox(width: 14),
+                    if (legend.isNotEmpty)
+                      pw.Expanded(
+                        child: _section(
+                          'Legend',
+                          [
+                            for (final section in legend)
+                              pw.Wrap(
+                                spacing: 8,
+                                runSpacing: 3,
+                                children: [
+                                  for (final entry in section.entries)
+                                    pw.Row(
+                                      mainAxisSize: pw.MainAxisSize.min,
+                                      children: [
+                                        pw.Container(
+                                            width: 7,
+                                            height: 7,
+                                            color: PdfColor.fromInt(
+                                                entry.color.toARGB32())),
+                                        pw.SizedBox(width: 3),
+                                        pw.Text(
+                                            '${entry.markerType.shortLabel} ${entry.markerType.label}',
+                                            style: const pw.TextStyle(
+                                                fontSize: 7)),
+                                      ],
+                                    ),
+                                ],
                               ),
-                            ),
-                            pw.SizedBox(width: 5),
-                            pw.Expanded(
-                              child: pw.Text(
-                                '${entry.markerType.shortLabel}  ${entry.markerType.label}',
-                                style: const pw.TextStyle(fontSize: 8),
-                              ),
-                            ),
                           ],
                         ),
                       ),
                   ],
                 ),
-                pw.SizedBox(height: 6),
-              ],
-            ],
+              ),
           ],
         ),
       ),
@@ -149,4 +221,23 @@ class GraphPdfExport {
     }
     return document.save();
   }
+
+  static pw.Widget _section(String title, List<pw.Widget> children) =>
+      pw.Container(
+        padding: const pw.EdgeInsets.all(6),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: PdfColors.grey400),
+          borderRadius: pw.BorderRadius.circular(4),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(title,
+                style: const pw.TextStyle(
+                    fontSize: 9, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 3),
+            ...children,
+          ],
+        ),
+      );
 }

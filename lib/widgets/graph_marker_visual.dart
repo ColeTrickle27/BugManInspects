@@ -22,7 +22,9 @@ IconData iconForGraphMarker(GraphMarkerType marker) => switch (marker.symbol) {
       GraphMarkerSymbol.window => Icons.window_outlined,
       GraphMarkerSymbol.steps => Icons.stairs_outlined,
       GraphMarkerSymbol.hvac => Icons.ac_unit_outlined,
-      GraphMarkerSymbol.utility => Icons.cable_outlined,
+      GraphMarkerSymbol.utility => marker == GraphMarkerType.crawlspaceAccess
+          ? Icons.drag_handle
+          : Icons.cable_outlined,
       GraphMarkerSymbol.support => Icons.foundation_outlined,
       GraphMarkerSymbol.drillVertical => Icons.south_outlined,
       GraphMarkerSymbol.drillHorizontal => Icons.east_outlined,

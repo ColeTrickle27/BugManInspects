@@ -97,7 +97,7 @@ enum GraphMarkerType {
   foundationCrack('Foundation Crack', 'FC', Color(0xFFD33A2C)),
   plumbingPenetration('Plumbing Penetration', 'PP', Color(0xFF168AAD)),
   utilityPenetration('Utility Penetration', 'UP', Color(0xFF5A6C7D)),
-  crawlspaceAccess('Crawlspace Access Door', 'CSA', Color(0xFF2E7D55)),
+  crawlspaceAccess('Crawlspace Access', 'Access', Color(0xFF2E7D55)),
   vent('Vent', 'V', Color(0xFF5A9BD8)),
   expansionJoint('Expansion Joint', 'EJ', Color(0xFF56616E)),
   structuralConcern('Structural Concern', 'SC', Color(0xFFD33A2C)),
@@ -107,7 +107,7 @@ enum GraphMarkerType {
   activeLeak('Active Leak', 'AL', Color(0xFF0077B6)),
   condensation('Condensation', 'CON', Color(0xFF5A9BD8)),
   drainageConcern('Drainage Concern', 'DC', Color(0xFF168AAD)),
-  vaporBarrierIssue('Vapor Barrier Issue', 'VB', Color(0xFF7048D8)),
+  vaporBarrierIssue('Vapor Barrier Issue', 'VB', Color(0xFF245BDB)),
   door('Door', 'DR', Color(0xFF435C70)),
   window('Window', 'WIN', Color(0xFF245B9E)),
   garageDoor('Garage Door', 'GD', Color(0xFF435C70)),
@@ -232,7 +232,8 @@ extension GraphMarkerTypeMetadata on GraphMarkerType {
         GraphMarkerType.oldDamage ||
         GraphMarkerType.woodDecay ||
         GraphMarkerType.rot ||
-        GraphMarkerType.woodToGroundContact =>
+        GraphMarkerType.woodToGroundContact ||
+        GraphMarkerType.vaporBarrierIssue =>
           GraphMarkerSymbol.damage,
         GraphMarkerType.mudTube => GraphMarkerSymbol.mudTube,
         GraphMarkerType.rodentActivity => GraphMarkerSymbol.rodent,
@@ -257,9 +258,8 @@ extension GraphMarkerTypeMetadata on GraphMarkerType {
         GraphMarkerType.pestEntryPoint ||
         GraphMarkerType.entryPoint =>
           GraphMarkerSymbol.penetration,
-        GraphMarkerType.accessPoint ||
-        GraphMarkerType.crawlspaceAccess =>
-          GraphMarkerSymbol.access,
+        GraphMarkerType.accessPoint => GraphMarkerSymbol.access,
+        GraphMarkerType.crawlspaceAccess => GraphMarkerSymbol.utility,
         GraphMarkerType.vent ||
         GraphMarkerType.foundationVent =>
           GraphMarkerSymbol.vent,

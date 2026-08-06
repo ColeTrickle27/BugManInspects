@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../models/graph_shape.dart';
@@ -36,6 +38,11 @@ String shapeMeasurementSummary(
     return '${MeasurementFormat.acres(acres)} • '
         '${MeasurementFormat.squareFeet(squareFeet)} • '
         '${MeasurementFormat.linearFeet(linearFeet)}';
+  }
+
+  if (preset == GraphDrawingPreset.fenceLine ||
+      preset == GraphDrawingPreset.measurementLine) {
+    return MeasurementFormat.linearFeet(linearFeet);
   }
 
   return '';
@@ -138,7 +145,9 @@ class GraphShapesPainter extends CustomPainter {
         measurementSummary.isEmpty
             ? shapeLabel
             : '$shapeLabel\n$measurementSummary',
-        bounds.center,
+        shape.preset == GraphDrawingPreset.propertyLine
+            ? _propertyLineLabelPosition(shapeSegments, bounds)
+            : bounds.center,
       );
 
       if (i == hoveredShapeIndex && i != selectedShapeIndex) {
@@ -155,6 +164,28 @@ class GraphShapesPainter extends CustomPainter {
         _drawSelectedShape(canvas, shape, shapeSegments, path, bounds);
       }
     }
+  }
+
+  Offset _propertyLineLabelPosition(
+    List<WallSegment> segments,
+    Rect bounds,
+  ) {
+    final longest = segments.reduce(
+      (current, candidate) =>
+          candidate.lengthFeet > current.lengthFeet ? candidate : current,
+    );
+    final start = longest.start.offset;
+    final end = longest.end.offset;
+    final midpoint = Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
+    final vector = end - start;
+    if (vector.distance == 0) return midpoint;
+    var normal = Offset(-vector.dy, vector.dx) / vector.distance;
+    final towardCenter = bounds.center - midpoint;
+    if ((normal.dx * towardCenter.dx) + (normal.dy * towardCenter.dy) > 0) {
+      normal = -normal;
+    }
+    return midpoint +
+        (normal * math.min(42, math.max(22, bounds.shortestSide / 8)));
   }
 
   void _drawShapeBorder(Canvas canvas, GraphShape shape, Path path) {
@@ -401,7 +432,7 @@ class GraphShapesPainter extends CustomPainter {
       text: TextSpan(
         text: name,
         style: const TextStyle(
-          color: Color(0xFF1C2B22),
+          color: Color(0xFFCC2000),
           fontSize: 15,
           fontWeight: FontWeight.w800,
           height: 1.25,
@@ -422,12 +453,12 @@ class GraphShapesPainter extends CustomPainter {
 
     canvas.drawRRect(
       labelRRect,
-      Paint()..color = const Color.fromRGBO(255, 255, 255, 0.82),
+      Paint()..color = const Color(0xFF6D6E71),
     );
     canvas.drawRRect(
       labelRRect,
       Paint()
-        ..color = const Color(0xFFD1CCBF)
+        ..color = Colors.black
         ..style = PaintingStyle.stroke,
     );
     textPainter.paint(

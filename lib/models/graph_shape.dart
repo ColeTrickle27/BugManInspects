@@ -21,7 +21,7 @@ enum GraphDrawingPresetKind {
 enum GraphDrawingPreset {
   mainStructure(
     'Main Structure',
-    'MAIN',
+    'Main Structure',
     GraphDrawingPresetKind.area,
     Color(0xFFB6D94C),
     0.30,

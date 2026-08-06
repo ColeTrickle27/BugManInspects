@@ -102,6 +102,11 @@ class GraphAnnotationsPainter extends CustomPainter {
   }
 
   void _drawMarker(Canvas canvas, GraphAnnotation annotation) {
+    if (annotation.markerType == GraphMarkerType.treatmentNote &&
+        _calloutTip(annotation) != null) {
+      _drawTreatmentCallout(canvas, annotation, _calloutTip(annotation)!);
+      return;
+    }
     final center = annotation.point.offset;
     final color = annotation.color ?? annotation.markerType.defaultColor;
     final iconSize = 34 * annotation.size;
@@ -134,12 +139,90 @@ class GraphAnnotationsPainter extends CustomPainter {
     );
 
     canvas.restore();
+    final isUtility = utilityMarkerTypes.contains(annotation.markerType);
+    final isTreatment = isTreatmentMarker(annotation.markerType);
     _drawSmallLabel(
       canvas,
       center + Offset(0, 36 * annotation.size),
       annotation.label,
       leadingIcon: noticeIconForGraphAnnotation(annotation),
       leadingIconColor: color,
+      textColor: isUtility ? Colors.black : const Color(0xFF6D6E71),
+      backgroundColor: isUtility
+          ? Colors.transparent
+          : isTreatment
+              ? const Color(0xFF245BDB)
+              : const Color(0xFFCC2000),
+      borderColor: isUtility ? Colors.transparent : Colors.black,
+    );
+  }
+
+  Offset? _calloutTip(GraphAnnotation annotation) {
+    final x = annotation.extraProperties['calloutTipX'];
+    final y = annotation.extraProperties['calloutTipY'];
+    if (x is! num || y is! num) return null;
+    return Offset(x.toDouble(), y.toDouble());
+  }
+
+  void _drawTreatmentCallout(
+    Canvas canvas,
+    GraphAnnotation annotation,
+    Offset tip,
+  ) {
+    final center = annotation.point.offset;
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: annotation.label,
+        style: TextStyle(
+          color: annotation.textColor,
+          fontSize: annotation.fontSize,
+          fontWeight: annotation.bold ? FontWeight.w800 : FontWeight.w600,
+          fontStyle: annotation.italic ? FontStyle.italic : FontStyle.normal,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    )..layout(maxWidth: 210);
+    final rect = Rect.fromCenter(
+      center: center,
+      width: math.max(128, textPainter.width + 30),
+      height: math.max(48, textPainter.height + 22),
+    );
+    final box = RRect.fromRectAndRadius(rect, const Radius.circular(7));
+    final nearest = Offset(
+      tip.dx.clamp(rect.left, rect.right),
+      tip.dy.clamp(rect.top, rect.bottom),
+    );
+    final linePaint = Paint()
+      ..color = annotation.borderColor
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(tip, nearest, linePaint);
+    final direction = (nearest - tip);
+    if (direction.distance > 0) {
+      final unit = direction / direction.distance;
+      final left = Offset(-unit.dy, unit.dx);
+      final arrow = Path()
+        ..moveTo(tip.dx, tip.dy)
+        ..lineTo(
+          tip.dx + (unit.dx * 13) + (left.dx * 6),
+          tip.dy + (unit.dy * 13) + (left.dy * 6),
+        )
+        ..lineTo(
+          tip.dx + (unit.dx * 13) - (left.dx * 6),
+          tip.dy + (unit.dy * 13) - (left.dy * 6),
+        )
+        ..close();
+      canvas.drawPath(arrow, Paint()..color = annotation.borderColor);
+    }
+    canvas.drawRRect(box, Paint()..color = annotation.backgroundColor);
+    canvas.drawRRect(box, linePaint);
+    textPainter.paint(
+      canvas,
+      Offset(
+        center.dx - (textPainter.width / 2),
+        center.dy - (textPainter.height / 2),
+      ),
     );
   }
 
@@ -259,14 +342,18 @@ class GraphAnnotationsPainter extends CustomPainter {
       const Radius.circular(5),
     );
 
-    canvas.drawRRect(labelRRect, Paint()..color = backgroundColor);
-    canvas.drawRRect(
-      labelRRect,
-      Paint()
-        ..color = borderColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
-    );
+    if (backgroundColor.a > 0) {
+      canvas.drawRRect(labelRRect, Paint()..color = backgroundColor);
+    }
+    if (borderColor.a > 0) {
+      canvas.drawRRect(
+        labelRRect,
+        Paint()
+          ..color = borderColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+    }
     final contentLeft = center.dx - (contentWidth / 2);
     if (iconPainter != null) {
       iconPainter.paint(

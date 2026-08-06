@@ -400,7 +400,7 @@ void main() {
     await tester.tapAt(const Offset(300, 250));
     await tester.tapAt(const Offset(500, 250));
     await tester.tapAt(const Offset(500, 450));
-    await tester.tap(find.text('Finish'));
+    await tester.tap(find.text('Close Shape'));
     await tester.pump();
 
     expect(_shapeCount(tester), 1);
@@ -579,8 +579,7 @@ void main() {
     expect(find.text('20:1'), findsNothing);
   });
 
-  testWidgets(
-      'Save and Upload update the same Ops Brain graph key',
+  testWidgets('Save and Upload update the same Ops Brain graph key',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(910, 794);
@@ -1127,7 +1126,8 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
   });
 
-  testWidgets('Finish closes and saves a multi-point line', (tester) async {
+  testWidgets('Close Shape closes and saves a multi-point line',
+      (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
@@ -1136,13 +1136,13 @@ void main() {
     await tester.tapAt(const Offset(320, 260));
     await tester.tapAt(const Offset(500, 260));
     await tester.tapAt(const Offset(500, 420));
-    await tester.tap(find.text('Finish').first);
+    await tester.tap(find.text('Close Shape').first);
     await tester.pumpAndSettle();
 
     final dialog = find.byType(AlertDialog);
     expect(dialog, findsOneWidget);
     await tester.tap(
-      find.descendant(of: dialog, matching: find.text('Finish')),
+      find.descendant(of: dialog, matching: find.text('Close Shape')),
     );
     await tester.pumpAndSettle();
 

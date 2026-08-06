@@ -18,7 +18,7 @@ enum CanvasTool {
   freehand(Icons.gesture, 'Freehand', 'F'),
   marker(Icons.place_outlined, 'Marker', 'M'),
   photo(Icons.add_a_photo_outlined, 'Photo', ''),
-  text(Icons.text_fields, 'Text', 'T');
+  text(Icons.note_add_outlined, '+Note', 'T');
 
   const CanvasTool(this.icon, this.label, this.shortcut);
 

@@ -348,12 +348,33 @@ class CanvasToolbar extends StatelessWidget {
               _CollapsibleToolbarSection(
                 label: 'Treatment Markers',
                 children: [
+                  _ActionButton(
+                    action: const CanvasToolbarAction.marker(
+                      GraphMarkerType.treatmentNote,
+                    ),
+                    selectedTool: selectedTool,
+                    selectedPreset: selectedDrawingPreset,
+                    selectedMarker: selectedMarkerType,
+                    onPressed: _activate,
+                    onDoubleTap: () => onActionDoubleTapped(
+                      const CanvasToolbarAction.marker(
+                        GraphMarkerType.treatmentNote,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   _MarkerPickerButton(
                     tooltipLabel: 'Treatment Marker',
                     selectedMarker: selectedMarkerType,
                     active: selectedTool == CanvasTool.marker &&
-                        treatmentMarkerTypes.contains(selectedMarkerType),
-                    markers: treatmentMarkerTypes,
+                        treatmentMarkerTypes
+                            .where((marker) =>
+                                marker != GraphMarkerType.treatmentNote)
+                            .contains(selectedMarkerType),
+                    markers: treatmentMarkerTypes
+                        .where(
+                            (marker) => marker != GraphMarkerType.treatmentNote)
+                        .toList(),
                     onSelected: onMarkerSelected,
                   ),
                 ],
@@ -387,6 +408,8 @@ class CanvasQuickToolbar extends StatelessWidget {
     required this.onToggleProperties,
     required this.onToggleLayers,
     required this.onDeleteSelection,
+    required this.onUndo,
+    required this.onRedo,
     required this.propertiesSelected,
     required this.layersSelected,
     super.key,
@@ -403,6 +426,8 @@ class CanvasQuickToolbar extends StatelessWidget {
   final VoidCallback onToggleProperties;
   final VoidCallback onToggleLayers;
   final VoidCallback onDeleteSelection;
+  final VoidCallback onUndo;
+  final VoidCallback onRedo;
   final bool propertiesSelected;
   final bool layersSelected;
 
@@ -413,7 +438,7 @@ class CanvasQuickToolbar extends StatelessWidget {
       onAcceptWithDetails: (details) => onActionAdded(details.data),
       builder: (context, candidates, rejected) => LayoutBuilder(
         builder: (context, constraints) {
-          final compact = constraints.maxWidth < 440;
+          final compact = constraints.maxWidth < 1120;
           return SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Material(
@@ -459,6 +484,19 @@ class CanvasQuickToolbar extends StatelessWidget {
                           onPressed: () => onActionSelected(action),
                         ),
                       ),
+                    const SizedBox(height: 34, child: VerticalDivider()),
+                    _QuickUtilityButton(
+                      icon: Icons.undo,
+                      tooltip: 'Quick undo',
+                      selected: false,
+                      onPressed: onUndo,
+                    ),
+                    _QuickUtilityButton(
+                      icon: Icons.redo,
+                      tooltip: 'Quick redo',
+                      selected: false,
+                      onPressed: onRedo,
+                    ),
                     const SizedBox(height: 34, child: VerticalDivider()),
                     _QuickUtilityButton(
                       icon: Icons.tune,
@@ -748,7 +786,9 @@ class _QuickActionButton extends StatelessWidget {
                   size: 20,
                   color: selected ? Colors.white : action.color,
                 ),
-                if (!compact) ...[
+                if (!compact &&
+                    action.tool != CanvasTool.select &&
+                    action.tool != CanvasTool.pan) ...[
                   const SizedBox(width: 5),
                   Text(
                     action.label,

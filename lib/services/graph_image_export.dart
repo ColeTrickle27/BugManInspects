@@ -13,8 +13,17 @@ class GraphImageExport {
     RenderRepaintBoundary boundary,
     ui.Rect contentBounds, {
     List<GraphLegendSection> legend = const [],
+    List<String> measurementSummary = const [],
+    Uint8List? brandingLogo,
   }) async {
     final source = await boundary.toImage(pixelRatio: 1);
+    ui.Image? logo;
+    if (brandingLogo != null) {
+      final codec = await ui.instantiateImageCodec(brandingLogo);
+      final frame = await codec.getNextFrame();
+      logo = frame.image;
+      codec.dispose();
+    }
     try {
       final imageBounds = ui.Rect.fromLTWH(
         0,
@@ -40,20 +49,52 @@ class GraphImageExport {
                   total + 1 + (section.entries.length / columns).ceil(),
             );
       final legendHeight = legendRows == 0 ? 0.0 : 24 + (legendRows * 38.0);
+      final summaryHeight = measurementSummary.isEmpty
+          ? 0.0
+          : 34 + (measurementSummary.length * 24.0);
+      final brandingHeight = logo == null ? 0.0 : 48.0;
       final recorder = ui.PictureRecorder();
       final canvas = ui.Canvas(recorder);
       final destination = ui.Rect.fromLTWH(0, 0, crop.width, crop.height);
       canvas.drawRect(
-        ui.Rect.fromLTWH(0, 0, crop.width, crop.height + legendHeight),
+        ui.Rect.fromLTWH(
+          0,
+          0,
+          crop.width,
+          crop.height + brandingHeight + summaryHeight + legendHeight,
+        ),
         ui.Paint()..color = const ui.Color(0xFFFFFFFF),
       );
       canvas.drawImageRect(source, crop, destination, ui.Paint());
+      if (logo != null) {
+        canvas.drawImageRect(
+          logo,
+          ui.Rect.fromLTWH(0, 0, logo.width.toDouble(), logo.height.toDouble()),
+          ui.Rect.fromLTWH(16, crop.height + 8, 130, 32),
+          ui.Paint(),
+        );
+      }
+      if (measurementSummary.isNotEmpty) {
+        _drawMeasurementSummary(
+          canvas,
+          crop.width,
+          crop.height + brandingHeight,
+          measurementSummary,
+        );
+      }
       if (legend.isNotEmpty) {
-        _drawLegend(canvas, crop.width, crop.height, legend, columns);
+        _drawLegend(
+          canvas,
+          crop.width,
+          crop.height + brandingHeight + summaryHeight,
+          legend,
+          columns,
+        );
       }
       final cropped = await recorder.endRecording().toImage(
             crop.width.ceil(),
-            (crop.height + legendHeight).ceil(),
+            (crop.height + brandingHeight + summaryHeight + legendHeight)
+                .ceil(),
           );
       try {
         final data = await cropped.toByteData(format: ui.ImageByteFormat.png);
@@ -66,6 +107,34 @@ class GraphImageExport {
       }
     } finally {
       source.dispose();
+      logo?.dispose();
+    }
+  }
+
+  static void _drawMeasurementSummary(
+    ui.Canvas canvas,
+    double width,
+    double top,
+    List<String> summaries,
+  ) {
+    _drawText(
+      canvas,
+      'Measurement Summary',
+      const ui.Offset(16, 0),
+      top + 14,
+      fontSize: 18,
+      bold: true,
+    );
+    final columns = (width / 300).floor().clamp(1, 3);
+    final columnWidth = width / columns;
+    for (var i = 0; i < summaries.length; i += 1) {
+      _drawText(
+        canvas,
+        summaries[i],
+        ui.Offset(16 + ((i % columns) * columnWidth), 0),
+        top + 40 + ((i ~/ columns) * 24),
+        fontSize: 13,
+      );
     }
   }
 
