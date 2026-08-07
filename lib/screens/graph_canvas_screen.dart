@@ -29,6 +29,7 @@ import '../services/graph_photo_service.dart';
 import '../services/graph_photo_picker_factory.dart';
 import '../services/graph_repository.dart';
 import '../services/graph_repository_stub.dart';
+import '../services/sales_brain_bridge.dart';
 import '../services/trace_projection_service.dart';
 import '../widgets/canvas_toolbar.dart';
 import '../widgets/freehand_strokes_painter.dart';
@@ -4589,6 +4590,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _deletedPhotoBlobKeys.clear();
         _canvasStatus = portalResult?.message ?? 'Saved on this device';
       });
+      if (portalResult != null) notifySalesBrainGraphSaved(portalResult.key);
       _showCanvasMessage(
         portalResult?.message ?? 'Graph saved on this device',
       );
@@ -4618,6 +4620,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _portalKey = result.key;
         _canvasStatus = 'Uploaded to Holloman Ops Brain';
       });
+      notifySalesBrainGraphSaved(result.key);
       _showCanvasMessage(result.message);
     } catch (error) {
       if (!mounted) return;

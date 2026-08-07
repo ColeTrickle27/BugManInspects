@@ -1,0 +1,1 @@
+void notifySalesBrainGraphSaved(String graphKey) {}
