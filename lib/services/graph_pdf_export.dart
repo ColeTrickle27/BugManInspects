@@ -37,6 +37,7 @@ class GraphPdfExport {
     List<GraphMeasurementSummary> measurementSummary = const [],
     List<GraphPdfPhoto> photos = const [],
     Uint8List? brandingLogo,
+    Uint8List? markerIconFontBytes,
   }) async {
     final document = pw.Document(
       title: title,
@@ -44,6 +45,9 @@ class GraphPdfExport {
     );
     final image = pw.MemoryImage(graphPng);
     final logo = brandingLogo == null ? null : pw.MemoryImage(brandingLogo);
+    final markerIconFont = markerIconFontBytes == null
+        ? null
+        : pw.Font.ttf(markerIconFontBytes.buffer.asByteData());
     document.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.letter.landscape,
@@ -146,11 +150,26 @@ class GraphPdfExport {
                                     pw.Row(
                                       mainAxisSize: pw.MainAxisSize.min,
                                       children: [
-                                        pw.Container(
+                                        if (markerIconFont != null)
+                                          pw.Text(
+                                            String.fromCharCode(
+                                                entry.icon.codePoint),
+                                            style: pw.TextStyle(
+                                              font: markerIconFont,
+                                              fontSize: 10,
+                                              color: PdfColor.fromInt(
+                                                entry.color.toARGB32(),
+                                              ),
+                                            ),
+                                          )
+                                        else
+                                          pw.Container(
                                             width: 7,
                                             height: 7,
                                             color: PdfColor.fromInt(
-                                                entry.color.toARGB32())),
+                                              entry.color.toARGB32(),
+                                            ),
+                                          ),
                                         pw.SizedBox(width: 3),
                                         pw.Text(
                                             '${entry.markerType.shortLabel} ${entry.markerType.label}',

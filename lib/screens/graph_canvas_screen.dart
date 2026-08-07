@@ -5097,7 +5097,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                 .map((item) => '${item.label}: ${item.measurements.join(' ')}')
                 .toList(growable: false)
             : const [],
-        brandingLogo: brandingLogo,
+        brandingLogo: format == _GraphExportFormat.png ? brandingLogo : null,
       );
       final safeName = _document.customer.name
           .replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '-')
@@ -5115,6 +5115,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
               legend: legend,
               measurementSummary: _buildExportMeasurementSummary(),
               brandingLogo: brandingLogo,
+              markerIconFontBytes: (await rootBundle
+                      .load('assets/fonts/MaterialIcons-Regular.otf'))
+                  .buffer
+                  .asUint8List(),
               photos: _isLayerVisible(_GraphLayer.photos)
                   ? await _buildPdfPhotos()
                   : const [],

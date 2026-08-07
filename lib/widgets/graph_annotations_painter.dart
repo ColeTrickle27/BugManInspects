@@ -35,7 +35,7 @@ class GraphAnnotationsPainter extends CustomPainter {
 
       switch (annotation.kind) {
         case GraphAnnotationKind.marker:
-          _drawMarker(canvas, annotation);
+          _drawMarker(canvas, annotation, size);
           break;
         case GraphAnnotationKind.photo:
           _drawPhotoPin(canvas, annotation);
@@ -101,10 +101,15 @@ class GraphAnnotationsPainter extends CustomPainter {
     }
   }
 
-  void _drawMarker(Canvas canvas, GraphAnnotation annotation) {
+  void _drawMarker(Canvas canvas, GraphAnnotation annotation, Size canvasSize) {
     if (annotation.markerType == GraphMarkerType.treatmentNote &&
         _calloutTip(annotation) != null) {
-      _drawTreatmentCallout(canvas, annotation, _calloutTip(annotation)!);
+      _drawTreatmentCallout(
+        canvas,
+        annotation,
+        _calloutTip(annotation)!,
+        canvasSize,
+      );
       return;
     }
     final center = annotation.point.offset;
@@ -171,8 +176,9 @@ class GraphAnnotationsPainter extends CustomPainter {
     Canvas canvas,
     GraphAnnotation annotation,
     Offset tip,
+    Size canvasSize,
   ) {
-    final center = annotation.point.offset;
+    final requestedCenter = annotation.point.offset;
     final textPainter = TextPainter(
       text: TextSpan(
         text: annotation.label,
@@ -186,10 +192,20 @@ class GraphAnnotationsPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
       textAlign: TextAlign.center,
     )..layout(maxWidth: 210);
+    final width = math.max(128, textPainter.width + 30);
+    final height = math.max(48, textPainter.height + 22);
+    final center = Offset(
+      requestedCenter.dx
+          .clamp(width / 2, canvasSize.width - (width / 2))
+          .toDouble(),
+      requestedCenter.dy
+          .clamp(height / 2, canvasSize.height - (height / 2))
+          .toDouble(),
+    );
     final rect = Rect.fromCenter(
       center: center,
-      width: math.max(128, textPainter.width + 30),
-      height: math.max(48, textPainter.height + 22),
+      width: width,
+      height: height,
     );
     final box = RRect.fromRectAndRadius(rect, const Radius.circular(7));
     final nearest = Offset(
