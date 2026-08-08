@@ -6,8 +6,9 @@ void notifySalesBrainGraphSaved(String graphKey) {
   if (graphKey.trim().isEmpty || !Uri.base.path.startsWith('/bugman-graphs/')) {
     return;
   }
-  if (html.window.parent == html.window) return;
-  html.window.parent.postMessage(
+  final parent = html.window.parent;
+  if (parent == null || parent == html.window) return;
+  parent.postMessage(
     <String, String>{'type': 'bugman-graph:saved', 'graphKey': graphKey},
     Uri.base.origin,
   );
