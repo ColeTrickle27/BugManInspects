@@ -192,8 +192,7 @@ class GraphAnnotationsPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
       textAlign: TextAlign.center,
     )..layout(maxWidth: 210);
-    final width = math.max(128, textPainter.width + 30);
-    final height = math.max(48, textPainter.height + 22);
+    final width = math.max(128.0, textPainter.width + 30);    final height = math.max(48.0, textPainter.height + 22);
     final center = Offset(
       requestedCenter.dx
           .clamp(width / 2, canvasSize.width - (width / 2))
