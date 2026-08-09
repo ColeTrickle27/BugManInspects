@@ -17,6 +17,7 @@ dependencies:
   flutter_map_dragmarker: ^8.0.3
   latlong2: ^0.9.1
   package_info_plus: ^10.2.1
+  flex_color_picker: ^3.8.0
 
 dev_dependencies:
   flutter_test:

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -8,6 +9,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../editor/editor_interaction_controller.dart';
 import '../models/graph_annotation.dart';
+import '../models/marker_color_palette.dart';
 import '../models/graph_document.dart';
 import '../models/graph_marker_catalog.dart';
 import '../models/freehand_stroke.dart';
@@ -29,6 +31,8 @@ import '../services/graph_photo_service.dart';
 import '../services/graph_photo_picker_factory.dart';
 import '../services/graph_repository.dart';
 import '../services/graph_repository_stub.dart';
+import '../services/marker_defaults_store.dart';
+import '../services/marker_defaults_store_factory.dart';
 import '../services/sales_brain_bridge.dart';
 import '../services/trace_projection_service.dart';
 import '../widgets/canvas_toolbar.dart';
@@ -48,6 +52,7 @@ class GraphCanvasScreen extends StatefulWidget {
     this.photoPicker,
     this.portalService,
     this.portalKey,
+    this.markerDefaultsStore,
     super.key,
   }) : assert(job != null || document != null);
 
@@ -59,6 +64,7 @@ class GraphCanvasScreen extends StatefulWidget {
   final GraphPhotoPicker? photoPicker;
   final BugManPortalService? portalService;
   final String? portalKey;
+  final MarkerDefaultsStore? markerDefaultsStore;
 
   @override
   State<GraphCanvasScreen> createState() => _GraphCanvasScreenState();
@@ -157,6 +163,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     for (final markerType in GraphMarkerType.values)
       markerType: _MarkerStyleDefaults.fromMarkerType(markerType),
   };
+  late final MarkerDefaultsStore _markerDefaultsStore;
   Color? _defaultShapeFillColor = _ShapeFillChoice.lime.color;
   double _defaultShapeFillOpacity = _ShapeFillChoice.lime.opacity;
   Color _defaultShapeBorderColor = _ShapeBorderChoice.darkGreen.color;
@@ -221,6 +228,52 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _portalKey = widget.portalKey;
     _interaction = EditorInteractionController();
     _document.addListener(_handleDocumentChanged);
+    _markerDefaultsStore =
+        widget.markerDefaultsStore ?? createMarkerDefaultsStore();
+    _loadPersistedMarkerDefaults();
+  }
+
+  /// Merges any previously saved "Set as Default" marker styles into
+  /// [_markerDefaults]. Runs synchronously during [initState], before the
+  /// first frame, so newly-placed markers immediately reflect saved defaults.
+  /// This only changes which style is pre-selected for markers placed from
+  /// now on — it never touches annotations that already exist in the
+  /// document, since those already carry their own baked-in color/size.
+  void _loadPersistedMarkerDefaults() {
+    final saved = _markerDefaultsStore.load();
+    if (saved == null || saved.isEmpty) {
+      return;
+    }
+    for (final entry in saved.entries) {
+      GraphMarkerType markerType;
+      try {
+        markerType = GraphMarkerType.values.byName(entry.key);
+      } catch (_) {
+        continue; // Unknown/renamed marker type in older saved data; skip it.
+      }
+      final colorValue = entry.value['color'];
+      final sizeValue = entry.value['size'];
+      if (colorValue is! int || sizeValue is! num) {
+        continue;
+      }
+      _markerDefaults[markerType] = _MarkerStyleDefaults(
+        color: Color(colorValue),
+        size: sizeValue.toDouble(),
+      );
+    }
+  }
+
+  /// Persists the current [_markerDefaults] map so "Set as Default" choices
+  /// survive app restarts/page reloads.
+  void _persistMarkerDefaults() {
+    final serialized = <String, Map<String, Object?>>{
+      for (final entry in _markerDefaults.entries)
+        entry.key.name: {
+          'color': entry.value.color.toARGB32(),
+          'size': entry.value.size,
+        },
+    };
+    _markerDefaultsStore.save(serialized);
   }
 
   void _handleDocumentChanged() {
@@ -5436,6 +5489,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _canvasStatus =
           '${annotation.markerType.shortLabel} set as marker default';
     });
+    // Persist outside setState: this only affects future marker placements,
+    // never the document itself, so it must not affect dirty state.
+    _persistMarkerDefaults();
   }
 
   void _setTextDefault(int index) {
@@ -6723,29 +6779,10 @@ class _PropertiesSidebar extends StatelessWidget {
                     },
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<_MarkerColorChoice>(
-              initialValue: _markerColorChoiceForColor(
-                annotation.color ?? annotation.markerType.defaultColor,
-              ),
-              decoration: const InputDecoration(labelText: 'Color'),
-              items: _MarkerColorChoice.values
-                  .map(
-                    (choice) => DropdownMenuItem(
-                      value: choice,
-                      child: _ColorChoiceLabel(
-                        label: choice.label,
-                        color: choice.color,
-                      ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: annotationLocked
-                  ? null
-                  : (choice) {
-                      if (choice != null) {
-                        onAnnotationColorChanged(index, choice.color);
-                      }
-                    },
+            _MarkerColorPickerField(
+              color: annotation.color ?? annotation.markerType.defaultColor,
+              enabled: !annotationLocked,
+              onColorChanged: (color) => onAnnotationColorChanged(index, color),
             ),
             const SizedBox(height: 10),
             _LabeledSlider(
@@ -7388,6 +7425,78 @@ class _ColorChoiceLabel extends StatelessWidget {
         const SizedBox(width: 8),
         Text(label),
       ],
+    );
+  }
+}
+
+/// Marker fill-color field. Restricted to the fixed 8-color marker palette
+/// (see [markerColorPalette]) via `flex_color_picker`'s custom-swatch picker
+/// - no Material primary/accent/wheel colors are offered here, since markers
+/// must only ever use the approved palette. Existing marker colors saved
+/// from before this palette existed (i.e. not one of the 8 swatches) are
+/// preserved and simply shown with a "Custom" label instead of being reset.
+class _MarkerColorPickerField extends StatelessWidget {
+  const _MarkerColorPickerField({
+    required this.color,
+    required this.enabled,
+    required this.onColorChanged,
+  });
+
+  final Color color;
+  final bool enabled;
+  final ValueChanged<Color> onColorChanged;
+
+  String get _label {
+    for (final entry in markerColorPalette.entries) {
+      if (entry.value.toARGB32() == color.toARGB32()) {
+        return entry.key;
+      }
+    }
+    return 'Custom';
+  }
+
+  Future<void> _openPicker(BuildContext context) async {
+    final selected = await showColorPickerDialog(
+      context,
+      color,
+      title: Text(
+        'Marker color',
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+      pickersEnabled: const <ColorPickerType, bool>{
+        ColorPickerType.both: false,
+        ColorPickerType.primary: false,
+        ColorPickerType.accent: false,
+        ColorPickerType.bw: false,
+        ColorPickerType.custom: true,
+        ColorPickerType.wheel: false,
+      },
+      customColorSwatchesAndNames: markerColorSwatchesAndNames,
+      enableShadesSelection: false,
+      showColorName: true,
+      constraints: const BoxConstraints(
+        minHeight: 320,
+        minWidth: 300,
+        maxWidth: 320,
+      ),
+    );
+    // showColorPickerDialog resolves with the starting color when the
+    // dialog is dismissed without a selection. Only report a change when
+    // the color actually differs, so opening-then-cancelling this dialog
+    // never marks the document dirty (see dirty-state tracking rules).
+    if (selected.toARGB32() != color.toARGB32()) {
+      onColorChanged(selected);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InputDecorator(
+      decoration: const InputDecoration(labelText: 'Color'),
+      child: InkWell(
+        onTap: enabled ? () => _openPicker(context) : null,
+        child: _ColorChoiceLabel(label: _label, color: color),
+      ),
     );
   }
 }
