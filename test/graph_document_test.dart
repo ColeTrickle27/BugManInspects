@@ -319,4 +319,82 @@ void main() {
     expect(document.customer.name, 'Renamed Customer');
     expect(document.isDirty, isTrue);
   });
+
+  test('duplicateStructureFrom copies only wall/shape geometry and never touches the source', () {
+    final source = GraphDocument(
+      customer: GraphCustomerInfo.fromJob(job),
+      wallSegments: const [
+        WallSegment(start: GraphPoint(x: 0, y: 0), end: GraphPoint(x: 100, y: 0)),
+      ],
+      shapes: const [
+        GraphShape(
+          name: 'Main Structure',
+          segmentIndexes: [0],
+          fillColor: null,
+          fillOpacity: 0.3,
+          borderColor: Color(0xFF214D38),
+          borderWidth: 3,
+          pattern: GraphShapePattern.none,
+          closed: true,
+          rotationDegrees: 0,
+        ),
+      ],
+      annotations: const [
+        GraphAnnotation(
+          kind: GraphAnnotationKind.marker,
+          point: GraphPoint(x: 10, y: 10),
+          label: 'AT',
+          markerType: GraphMarkerType.activeTermites,
+        ),
+      ],
+      attachments: const [
+        GraphAttachment(id: 'photo-1', name: 'photo.jpg'),
+      ],
+      metadata: const {'nextPhotoNumber': 7},
+    );
+    source.markClean();
+    final sourceJsonBefore = source.toJson();
+
+    final duplicate = GraphDocument.duplicateStructureFrom(source);
+
+    expect(duplicate.id, isNot(source.id), reason: 'duplicate must get its own fresh id');
+    expect(duplicate.wallSegments, hasLength(1));
+    expect(duplicate.shapes, hasLength(1));
+    expect(duplicate.annotations, isEmpty, reason: 'annotations must not carry over');
+    expect(duplicate.attachments, isEmpty, reason: 'attachments must not carry over');
+    expect(duplicate.metadata['nextPhotoNumber'], isNull, reason: 'metadata must not carry over');
+    expect(duplicate.isDirty, isFalse);
+    expect(duplicate.customer.name, source.customer.name);
+
+    // Mutating the duplicate must never affect the original source document.
+    duplicate.replaceWallSegments(const []);
+    expect(source.wallSegments, hasLength(1),
+        reason: 'editing the duplicate must never mutate the original');
+    expect(source.toJson(), sourceJsonBefore,
+        reason: 'the original document must be completely untouched');
+  });
+
+  test('withNewIdentity copies every field but assigns a fresh id', () {
+    final source = GraphDocument(
+      customer: GraphCustomerInfo.fromJob(job),
+      wallSegments: const [
+        WallSegment(start: GraphPoint(x: 0, y: 0), end: GraphPoint(x: 50, y: 0)),
+      ],
+      annotations: const [
+        GraphAnnotation(
+          kind: GraphAnnotationKind.marker,
+          point: GraphPoint(x: 5, y: 5),
+          label: 'M',
+          markerType: GraphMarkerType.moisture,
+        ),
+      ],
+    );
+
+    final copy = GraphDocument.withNewIdentity(source);
+
+    expect(copy.id, isNot(source.id));
+    expect(copy.wallSegments, hasLength(1));
+    expect(copy.annotations, hasLength(1));
+    expect(copy.annotations.single.markerType, GraphMarkerType.moisture);
+  });
 }

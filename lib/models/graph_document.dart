@@ -58,6 +58,54 @@ class GraphDocument extends ChangeNotifier {
     );
   }
 
+  /// "+ New w/ Existing Structure" (item 7 of the production pass): starts
+  /// a brand new, independent graph that reuses only the structural
+  /// wall/shape geometry already drawn on [source] -- the physical layout
+  /// of a building rarely changes between visits, so retracing it for
+  /// every follow-up inspection is pure busywork.
+  ///
+  /// Deliberately NOT copied: annotations (inspection/treatment markers,
+  /// notes, photos), attachments, map traces, measurement calibration, and
+  /// metadata (including the photo-numbering counter) -- those all belong
+  /// to one specific inspection visit and must start clean. Freehand
+  /// strokes are treated the same way (as markup, not structure) and are
+  /// also excluded.
+  ///
+  /// The new document gets its own fresh id (via [newGraphId]) and its own
+  /// fresh createdAt/updatedAt ("now"); [source] itself and anything
+  /// already saved under its id/key are left completely untouched -- this
+  /// is a pure duplication, never an in-place overwrite of the original.
+  factory GraphDocument.duplicateStructureFrom(GraphDocument source) {
+    return GraphDocument(
+      customer: source.customer,
+      wallSegments: source.wallSegments,
+      shapes: source.shapes,
+    );
+  }
+
+  /// "Save As New" recovery (items 10 and 11 of the production pass):
+  /// produces a full, independent copy of [source] -- every graph object,
+  /// attachment, trace, calibration, and metadata entry -- but with a
+  /// fresh id/createdAt/updatedAt, so it can be saved to Ops Brain as a
+  /// brand new file without disturbing whatever [source] was previously
+  /// saved as (which may have been edited concurrently, renamed, or
+  /// deleted out from under this session).
+  factory GraphDocument.withNewIdentity(GraphDocument source) {
+    return GraphDocument(
+      customer: source.customer,
+      wallSegments: source.wallSegments,
+      annotations: source.annotations,
+      shapes: source.shapes,
+      freehandStrokes: source.freehandStrokes,
+      layers: source.layers,
+      attachments: source.attachments,
+      traces: source.traces,
+      measurementCalibration: source.measurementCalibration,
+      metadata: source.metadata,
+      extraProperties: source.extraProperties,
+    );
+  }
+
   /// Reads both the document format and the original flat graph payload.
   factory GraphDocument.fromJson(Map<String, Object?> json) {
     final graphObjects = _map(json['graphObjects']);

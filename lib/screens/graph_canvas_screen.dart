@@ -4714,6 +4714,61 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
   }
 
+  // "+ New w/ Existing Structure" (item 7 of the production pass): starts
+  // a brand new, separately-saved graph that reuses only this graph's
+  // structural wall/shape geometry. Nothing about the currently open
+  // document -- in memory or already saved to Ops Brain -- is modified.
+  Future<void> _newGraphWithExistingStructure() async {
+    if (_wallSegments.isEmpty && _shapes.isEmpty) {
+      _showCanvasMessage(
+        'Nothing to duplicate yet -- draw some structure first',
+        severity: _CanvasMessageSeverity.warning,
+      );
+      return;
+    }
+
+    final shouldCreate = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Start new graph with existing structure?'),
+        content: const Text(
+          'This opens a brand new graph that reuses the wall segments and '
+          'shapes already drawn here. Markers, notes, photos, traces, and '
+          'measurement calibration are not carried over, and this graph '
+          'itself will not be changed or overwritten.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Start New Graph'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || shouldCreate != true) {
+      return;
+    }
+
+    final newDocument = GraphDocument.duplicateStructureFrom(_document);
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => GraphCanvasScreen(
+          document: newDocument,
+          repository: _repository,
+          photoPicker: _photoPicker,
+          portalService: _portalService,
+          markerDefaultsStore: _markerDefaultsStore,
+        ),
+      ),
+    );
+  }
+
   Future<void> _completeTreatmentCallout(
     GraphPoint tip,
     Offset boxCenter,
@@ -6205,6 +6260,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onSave: _saveDocument,
                           onExport: _exportGraph,
                           onUpload: _uploadDocument,
+                          onNewWithExistingStructure:
+                              _newGraphWithExistingStructure,
                           onZoomIn: () => _zoomBy(1.2),
                           onZoomOut: () => _zoomBy(0.85),
                           onResetZoom: _resetZoom,
@@ -6335,6 +6392,7 @@ class _TopEditorToolbar extends StatelessWidget {
     required this.onSave,
     required this.onExport,
     required this.onUpload,
+    required this.onNewWithExistingStructure,
     required this.onZoomIn,
     required this.onZoomOut,
     required this.onResetZoom,
@@ -6353,6 +6411,7 @@ class _TopEditorToolbar extends StatelessWidget {
   final VoidCallback onSave;
   final VoidCallback onExport;
   final VoidCallback onUpload;
+  final VoidCallback onNewWithExistingStructure;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
   final VoidCallback onResetZoom;
@@ -6474,6 +6533,8 @@ class _TopEditorToolbar extends StatelessWidget {
                   _EditorFileAction.save => onSave(),
                   _EditorFileAction.export => onExport(),
                   _EditorFileAction.upload => onUpload(),
+                  _EditorFileAction.newWithExistingStructure =>
+                    onNewWithExistingStructure(),
                 },
                 itemBuilder: (context) => const [
                   PopupMenuItem(
@@ -6495,6 +6556,14 @@ class _TopEditorToolbar extends StatelessWidget {
                     child: ListTile(
                       leading: Icon(Icons.cloud_upload_outlined),
                       title: Text('Upload'),
+                    ),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: _EditorFileAction.newWithExistingStructure,
+                    child: ListTile(
+                      leading: Icon(Icons.difference_outlined),
+                      title: Text('+ New w/ Existing Structure'),
                     ),
                   ),
                 ],
@@ -8399,7 +8468,7 @@ enum _SidePanelMode { properties, layers }
 
 enum _PhotoSource { files, camera }
 
-enum _EditorFileAction { save, export, upload }
+enum _EditorFileAction { save, export, upload, newWithExistingStructure }
 
 enum _EditorOptionAction {
   grid,
