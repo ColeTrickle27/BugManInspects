@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -206,6 +207,30 @@ class GraphDocument extends ChangeNotifier {
 
   GraphLayerState layer(String id) => _layers[id] ?? const GraphLayerState();
 
+  // Dirty-state no-op guards (item 16 of the production pass): none of the
+  // domain model classes here (WallSegment, GraphAnnotation, GraphShape,
+  // etc.) implement value equality, so a naive `value == current` check
+  // would only catch identical object references. For the low-frequency,
+  // dialog/action-driven mutators below we compare the existing
+  // already-defined toJson() representations for deep, real-value equality
+  // -- a call that hands back content identical to what's already stored
+  // (e.g. a settings dialog cancelled without changes, or view-metadata
+  // paths) is a genuine no-op and must not dirty the document, bump the
+  // revision, or touch updatedAt.
+  //
+  // The structural mutators (replaceWallSegments/replaceAnnotations/
+  // replaceShapes/replaceFreehandStrokes/replaceTraces) deliberately do NOT
+  // get this deep-equality check: they're invoked on every pointer-move
+  // frame while dragging an endpoint, annotation, or shape (see
+  // _moveActiveTarget in graph_canvas_screen.dart), and a full JSON
+  // encode-and-compare of a large structural list on every frame is a real
+  // interactive-editing performance regression (benchmarked at over 1ms per
+  // call for a few hundred elements) for a case that almost never actually
+  // no-ops mid-drag. Those call sites are already gated by real user
+  // gestures (drag/add/delete/undo-redo), not by cancel/view paths, so the
+  // no-op risk there is negligible next to the perf cost.
+  bool _sameJson(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);
+
   void replaceWallSegments(Iterable<WallSegment> value) {
     _wallSegments = List<WallSegment>.of(value);
     _changed();
@@ -227,38 +252,75 @@ class GraphDocument extends ChangeNotifier {
   }
 
   void setLayer(String id, GraphLayerState value) {
+    final current = _layers[id];
+    if (current != null &&
+        current.visible == value.visible &&
+        current.locked == value.locked) {
+      return;
+    }
     _layers = <String, GraphLayerState>{..._layers, id: value};
     _changed();
   }
 
   void replaceAttachments(Iterable<GraphAttachment> value) {
-    _attachments = List<GraphAttachment>.of(value);
+    final next = List<GraphAttachment>.of(value);
+    if (_sameJson(
+      _attachments.map((item) => item.toJson()).toList(),
+      next.map((item) => item.toJson()).toList(),
+    )) {
+      return;
+    }
+    _attachments = next;
     _changed();
   }
 
   void replaceTraces(Iterable<TraceGeometry> value) {
+    // No deep-equality no-op guard here either, for the same interactive
+    // per-frame-drag performance reason as the structural mutators above
+    // (map-trace vertex dragging calls this on every pointer move).
     _traces = List<TraceGeometry>.of(value);
     _changed();
   }
 
   void setMeasurementCalibration(MeasurementCalibration value) {
+    if (_sameJson(_measurementCalibration.toJson(), value.toJson())) {
+      return;
+    }
     _measurementCalibration = value;
     _changed();
   }
 
   void replaceMetadata(Map<String, Object?> value) {
-    _metadata = Map<String, Object?>.of(value);
+    final next = Map<String, Object?>.of(value);
+    if (_sameJson(_metadata, next)) {
+      return;
+    }
+    _metadata = next;
     _changed();
   }
 
   void updateCustomer(GraphCustomerInfo value) {
+    if (_sameJson(customer.toJson(), value.toJson())) {
+      return;
+    }
     customer = value;
     _changed();
   }
 
   void updateJob(Job job) {
-    customer = GraphCustomerInfo.fromJob(job);
-    createdAt = job.createdDate;
+    // Creation Date integrity (item 10 of the production pass): the
+    // document's createdAt is set exactly once, at document creation, and
+    // must never change afterward -- including when the underlying Job's
+    // own date field is edited later (e.g. via the "edit job" flow in
+    // home_screen.dart, which lets a user pick a different job date).
+    // Previously this method unconditionally overwrote createdAt with
+    // job.createdDate on every edit, silently rewriting the graph's real
+    // Creation Date. Only customer/job identity fields are synced here now.
+    final next = GraphCustomerInfo.fromJob(job);
+    if (_sameJson(customer.toJson(), next.toJson())) {
+      return;
+    }
+    customer = next;
     _changed();
   }
 

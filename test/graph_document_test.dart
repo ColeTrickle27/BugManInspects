@@ -252,4 +252,71 @@ void main() {
     final roundTripped = GraphDocument.fromJson(restored.toJson());
     expect(roundTripped.annotations, hasLength(2));
   });
+
+  test('re-saving identical structural content does not dirty the document', () {
+    final document = GraphDocument.forJob(job);
+    const segments = [
+      WallSegment(
+        start: GraphPoint(x: 10, y: 20),
+        end: GraphPoint(x: 80, y: 20),
+      ),
+    ];
+
+    document.replaceWallSegments(segments);
+    document.markClean();
+    expect(document.isDirty, isFalse);
+
+    document.replaceMetadata(document.metadata);
+    expect(document.isDirty, isFalse, reason: 'unchanged metadata should not dirty the document');
+
+    document.updateCustomer(document.customer);
+    expect(document.isDirty, isFalse, reason: 'unchanged customer info should not dirty the document');
+
+    document.setMeasurementCalibration(document.measurementCalibration);
+    expect(document.isDirty, isFalse, reason: 'unchanged calibration should not dirty the document');
+
+    document.setLayer('structure', document.layer('structure'));
+    expect(document.isDirty, isFalse, reason: 'unchanged layer state should not dirty the document');
+
+    document.replaceAttachments(document.attachments);
+    expect(document.isDirty, isFalse, reason: 'unchanged attachments should not dirty the document');
+
+    document.updateJob(job);
+    expect(document.isDirty, isFalse, reason: 're-syncing the same job should not dirty the document');
+
+    final differentJob = Job(
+      customerName: 'Different Customer',
+      serviceAddress: job.serviceAddress,
+      pestPacLocationNumber: job.pestPacLocationNumber,
+      pestPacBillToNumber: job.pestPacBillToNumber,
+      serviceType: job.serviceType,
+      createdBy: job.createdBy,
+      createdDate: DateTime(2027, 1, 1),
+    );
+    document.updateJob(differentJob);
+    expect(document.isDirty, isTrue, reason: 'a real customer change must still dirty the document');
+  });
+
+  test('updateJob never rewrites the original Creation Date', () {
+    final document = GraphDocument.forJob(job);
+    final originalCreatedAt = document.createdAt;
+    document.markClean();
+
+    final laterJob = Job(
+      customerName: 'Renamed Customer',
+      serviceAddress: job.serviceAddress,
+      pestPacLocationNumber: job.pestPacLocationNumber,
+      pestPacBillToNumber: job.pestPacBillToNumber,
+      serviceType: job.serviceType,
+      createdBy: job.createdBy,
+      createdDate: DateTime(2030, 5, 5),
+    );
+
+    document.updateJob(laterJob);
+
+    expect(document.createdAt, originalCreatedAt,
+        reason: 'Creation Date must be set once and never reset by later job edits');
+    expect(document.customer.name, 'Renamed Customer');
+    expect(document.isDirty, isTrue);
+  });
 }
