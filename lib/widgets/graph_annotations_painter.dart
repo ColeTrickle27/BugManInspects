@@ -144,26 +144,43 @@ class GraphAnnotationsPainter extends CustomPainter {
     );
 
     canvas.restore();
-    final isUtility = utilityMarkerTypes.contains(annotation.markerType);
-    final isTreatment = isTreatmentMarker(annotation.markerType);
+    // Marker labels always scale from the same `annotation.size` value used
+    // for the icon, so icon size, font size, and icon-to-label spacing stay
+    // proportional to one another instead of drifting independently.
+    final labelFontSize = (_markerLabelBaseFontSize * annotation.size)
+        .clamp(_markerLabelMinFontSize, _markerLabelMaxFontSize)
+        .toDouble();
+    final labelGap = (_markerLabelBaseGap * annotation.size)
+        .clamp(_markerLabelMinGap, _markerLabelMaxGap)
+        .toDouble();
+    final iconBottom = center.dy + (iconPainter.height / 2);
     _drawSmallLabel(
       canvas,
-      center + Offset(0, 28 * annotation.size),
+      center,
       annotation.label,
+      topCenter: Offset(center.dx, iconBottom + labelGap),
       leadingIcon: noticeIconForGraphAnnotation(annotation),
       leadingIconColor: color,
-      textColor: isUtility ? Colors.black : const Color(0xFFE6E6E6),
-      fontWeight: isUtility ? FontWeight.w700 : FontWeight.w800,
-      backgroundColor: isUtility
-          ? Colors.transparent
-          : isTreatment
-              ? const Color(0xFF245BDB)
-              : const Color(0xFFCC2000),
-      borderColor: isUtility ? Colors.transparent : Colors.black,
-      horizontalPadding: 6,
-      verticalPadding: 2,
+      textColor: Colors.black,
+      fontWeight: FontWeight.w800,
+      fontSize: labelFontSize,
+      backgroundColor: Colors.transparent,
+      borderColor: Colors.transparent,
+      horizontalPadding: _markerLabelHorizontalPadding,
+      verticalPadding: _markerLabelVerticalPadding,
     );
   }
+
+  // Marker label scale constants. All derived from `annotation.size`, the
+  // same value that drives icon size, so the two never scale independently.
+  static const double _markerLabelBaseFontSize = 12;
+  static const double _markerLabelMinFontSize = 9;
+  static const double _markerLabelMaxFontSize = 22;
+  static const double _markerLabelBaseGap = 2.5;
+  static const double _markerLabelMinGap = 2;
+  static const double _markerLabelMaxGap = 6;
+  static const double _markerLabelHorizontalPadding = 2;
+  static const double _markerLabelVerticalPadding = 1;
 
   Offset? _calloutTip(GraphAnnotation annotation) {
     final x = annotation.extraProperties['calloutTipX'];
@@ -302,10 +319,18 @@ class GraphAnnotationsPainter extends CustomPainter {
     );
   }
 
+  /// Draws a compact label with optional leading icon.
+  ///
+  /// By default the label is centered on [center]. Pass [topCenter] to
+  /// instead anchor the label so its top edge sits at that point (used by
+  /// marker labels so the gap between the icon and the label stays tight and
+  /// scales with the marker rather than being measured from a fixed center
+  /// offset).
   void _drawSmallLabel(
     Canvas canvas,
     Offset center,
     String label, {
+    Offset? topCenter,
     Color textColor = const Color(0xFF1C2B22),
     double fontSize = 14,
     FontWeight fontWeight = FontWeight.w700,
@@ -351,11 +376,15 @@ class GraphAnnotationsPainter extends CustomPainter {
       textPainter.height,
       iconPainter?.height ?? 0,
     );
+    final totalHeight = contentHeight + (verticalPadding * 2);
+    final labelCenter = topCenter == null
+        ? center
+        : Offset(topCenter.dx, topCenter.dy + (totalHeight / 2));
 
     final labelRect = Rect.fromCenter(
-      center: center,
+      center: labelCenter,
       width: contentWidth + (horizontalPadding * 2),
-      height: contentHeight + (verticalPadding * 2),
+      height: totalHeight,
     );
     final labelRRect = RRect.fromRectAndRadius(
       labelRect,
@@ -374,13 +403,13 @@ class GraphAnnotationsPainter extends CustomPainter {
           ..strokeWidth = 1,
       );
     }
-    final contentLeft = center.dx - (contentWidth / 2);
+    final contentLeft = labelCenter.dx - (contentWidth / 2);
     if (iconPainter != null) {
       iconPainter.paint(
         canvas,
         Offset(
           contentLeft,
-          center.dy - (iconPainter.height / 2),
+          labelCenter.dy - (iconPainter.height / 2),
         ),
       );
     }
@@ -388,7 +417,7 @@ class GraphAnnotationsPainter extends CustomPainter {
       canvas,
       Offset(
         contentLeft + (iconPainter?.width ?? 0) + iconSpacing,
-        center.dy - (textPainter.height / 2),
+        labelCenter.dy - (textPainter.height / 2),
       ),
     );
   }
