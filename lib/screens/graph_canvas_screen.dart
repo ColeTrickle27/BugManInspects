@@ -4405,20 +4405,43 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         photosLocked;
   }
 
+  // Notification durations (item 12 of the production pass): short
+  // transient hints (locked layers, nothing selected, etc.) are
+  // informational; explicit success/warning/error messages get their own
+  // longer, more deliberate durations so a technician has time to actually
+  // read them, and warning/error toasts stay on screen long enough (and
+  // offer a manual close) that a real failure never flashes by unnoticed.
+  static const Duration _infoMessageDuration = Duration(seconds: 5);
+  static const Duration _successMessageDuration = Duration(seconds: 4);
+  static const Duration _warningMessageDuration = Duration(seconds: 7);
+  static const Duration _errorMessageDuration = Duration(seconds: 8);
+
   void _showCanvasMessage(
     String message, {
-    Duration duration = const Duration(milliseconds: 900),
+    Duration? duration,
+    _CanvasMessageSeverity severity = _CanvasMessageSeverity.info,
   }) {
     setState(() {
       _canvasStatus = message;
     });
+
+    final resolvedDuration = duration ??
+        switch (severity) {
+          _CanvasMessageSeverity.info => _infoMessageDuration,
+          _CanvasMessageSeverity.success => _successMessageDuration,
+          _CanvasMessageSeverity.warning => _warningMessageDuration,
+          _CanvasMessageSeverity.error => _errorMessageDuration,
+        };
+    final dismissible = severity == _CanvasMessageSeverity.warning ||
+        severity == _CanvasMessageSeverity.error;
 
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
           content: Text(message),
-          duration: duration,
+          duration: resolvedDuration,
+          showCloseIcon: dismissible,
         ),
       );
   }
@@ -4646,10 +4669,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       if (portalResult != null) notifySalesBrainGraphSaved(portalResult.key);
       _showCanvasMessage(
         portalResult?.message ?? 'Graph saved on this device',
+        severity: _CanvasMessageSeverity.success,
       );
     } catch (error) {
       if (!mounted) return;
-      _showCanvasMessage('Graph could not be saved: $error');
+      _showCanvasMessage(
+        'Graph could not be saved: $error',
+        severity: _CanvasMessageSeverity.error,
+      );
     }
   }
 
@@ -4657,7 +4684,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     if (!_portalService.isAvailable) {
       _showCanvasMessage(
         'Upload is available when BugMan Graphs is opened through Holloman Ops Brain',
-        duration: const Duration(seconds: 6),
+        severity: _CanvasMessageSeverity.warning,
       );
       return;
     }
@@ -4674,10 +4701,16 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _canvasStatus = 'Uploaded to Holloman Ops Brain';
       });
       notifySalesBrainGraphSaved(result.key);
-      _showCanvasMessage(result.message);
+      _showCanvasMessage(
+        result.message,
+        severity: _CanvasMessageSeverity.success,
+      );
     } catch (error) {
       if (!mounted) return;
-      _showCanvasMessage('Graph could not be uploaded: $error');
+      _showCanvasMessage(
+        'Graph could not be uploaded: $error',
+        severity: _CanvasMessageSeverity.error,
+      );
     }
   }
 
@@ -4874,7 +4907,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
             '${optimized.length} photo(s) added at pin $photoNumber';
       });
     } catch (error) {
-      if (mounted) _showCanvasMessage('Photos could not be added: $error');
+      if (mounted) {
+        _showCanvasMessage(
+          'Photos could not be added: $error',
+          severity: _CanvasMessageSeverity.error,
+        );
+      }
     }
   }
 
@@ -5118,7 +5156,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     final boundary = _canvasBoundaryKey.currentContext?.findRenderObject()
         as RenderRepaintBoundary?;
     if (boundary == null) {
-      _showCanvasMessage('Graph export is not ready yet');
+      _showCanvasMessage(
+        'Graph export is not ready yet',
+        severity: _CanvasMessageSeverity.warning,
+      );
       return;
     }
 
@@ -5171,10 +5212,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
               legend: legend,
               measurementSummary: _buildExportMeasurementSummary(),
               brandingLogo: brandingLogo,
-              markerIconFontBytes: (await rootBundle
-                      .load('assets/fonts/MaterialIcons-Regular.otf'))
-                  .buffer
-                  .asUint8List(),
+              // Marker-icon glyphs are intentionally NOT embedded in the PDF
+              // legend: the `pdf` package (3.13.0) detects a font's Unicode
+              // support by checking for a raw TrueType `glyf` table
+              // signature, which MaterialIcons-Regular.otf (a CFF-flavored
+              // OpenType font, signature `OTTO`) fails. That misdetection
+              // makes the package try to Latin1-encode the Material Icon's
+              // private-use-area codepoint and throw, which is the root
+              // cause PDF export always failed while PNG export (which
+              // never touches this font) worked. GraphPdfExport.build()
+              // already renders a solid-color square per legend entry when
+              // markerIconFontBytes is omitted, so the legend still reads
+              // correctly without embedding glyphs.
               photos: _isLayerVisible(_GraphLayer.photos)
                   ? await _buildPdfPhotos()
                   : const [],
@@ -5189,7 +5238,10 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       }
       setState(() => _canvasStatus = 'Graph ${format.label} exported');
     } catch (error) {
-      _showCanvasMessage('Graph export failed: $error');
+      _showCanvasMessage(
+        'Graph export failed: $error',
+        severity: _CanvasMessageSeverity.error,
+      );
     }
   }
 
@@ -8340,6 +8392,8 @@ class _UndoEntry {
   final int? shapeIndex;
   final int addedSegmentCount;
 }
+
+enum _CanvasMessageSeverity { info, success, warning, error }
 
 enum _SidePanelMode { properties, layers }
 
