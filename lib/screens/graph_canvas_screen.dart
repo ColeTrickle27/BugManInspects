@@ -34,6 +34,7 @@ import '../services/graph_repository_stub.dart';
 import '../services/marker_defaults_store.dart';
 import '../services/marker_defaults_store_factory.dart';
 import '../services/sales_brain_bridge.dart';
+import '../services/sales_brain_navigation.dart';
 import '../services/trace_projection_service.dart';
 import '../widgets/canvas_toolbar.dart';
 import '../widgets/freehand_strokes_painter.dart';
@@ -87,7 +88,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   final GlobalKey _canvasViewportKey = GlobalKey(debugLabel: 'Graph viewport');
   final TransformationController _transformationController =
       TransformationController();
-  late final GraphDocument _document;
+  // Not `late final`: "Save As New" recovery (items 10/11 of the
+  // production pass) needs to swap in a fresh GraphDocument (via
+  // GraphDocument.withNewIdentity) mid-session without tearing down and
+  // rebuilding the whole editor. See _replaceDocumentWithNewIdentity().
+  late GraphDocument _document;
   late final GraphRepository _repository;
   late final BugManPortalService _portalService;
   String? _portalKey;
@@ -4623,6 +4628,77 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     );
   }
 
+  // Item 10 of the production pass: when a graph has already been saved
+  // to Holloman Ops Brain, a subsequent Save must ask whether to
+  // overwrite that existing file or save the changes as a new file,
+  // rather than silently overwriting.
+  Future<void> _handleGraphFileSaveTapped() async {
+    if (!_document.isDirty) {
+      _showCanvasMessage(
+        'No changes to save',
+        severity: _CanvasMessageSeverity.info,
+      );
+      return;
+    }
+    if (_portalKey != null) {
+      final choice = await _confirmOverwriteOrSaveAsNew();
+      if (choice == null || choice == _SaveConflictChoice.cancel) return;
+      if (choice == _SaveConflictChoice.saveAsNew) {
+        _replaceDocumentWithNewIdentity();
+      }
+    }
+    await _saveDocument();
+  }
+
+  Future<_SaveConflictChoice?> _confirmOverwriteOrSaveAsNew() {
+    return showDialog<_SaveConflictChoice>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save changes'),
+        content: const Text(
+          'This graph was already saved to Holloman Ops Brain. Overwrite '
+          'the existing file with your changes, or save these changes as '
+          'a brand new file instead?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () =>
+                Navigator.of(context).pop(_SaveConflictChoice.cancel),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(context).pop(_SaveConflictChoice.saveAsNew),
+            child: const Text('Save As New'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(context).pop(_SaveConflictChoice.overwrite),
+            child: const Text('Overwrite Existing'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // "Save As New" recovery (items 10/11 of the production pass): swaps in
+  // a fresh GraphDocument.withNewIdentity() copy -- new id, new
+  // created/updated timestamps -- and clears _portalKey so the next save
+  // creates a brand new Ops Brain file instead of overwriting whatever is
+  // (or isn't, in the renamed/missing-key recovery case) sitting at the
+  // old key. The old document/listener are torn down cleanly.
+  void _replaceDocumentWithNewIdentity() {
+    final old = _document;
+    old.removeListener(_handleDocumentChanged);
+    _document = GraphDocument.withNewIdentity(old);
+    _document.addListener(_handleDocumentChanged);
+    old.dispose();
+    _portalKey = null;
+  }
+
+  bool _isGraphNotFoundError(Object error) =>
+      error.toString().contains('Saved graph not found.');
+
   Future<void> _saveDocument() async {
     try {
       final referencedAttachmentIds =
@@ -4651,13 +4727,33 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         blobs: _pendingPhotoBlobs,
         deletedBlobKeys: _deletedPhotoBlobKeys,
       );
-      final portalResult = _portalService.isAvailable
-          ? await _portalService.saveGraph(
+      PortalUploadResult? portalResult;
+      var recoveredAsNew = false;
+      if (_portalService.isAvailable) {
+        try {
+          portalResult = await _portalService.saveGraph(
+            _document,
+            portalBlobs,
+            existingKey: _portalKey,
+          );
+        } catch (error) {
+          // Item 11: the Ops Brain graph this document was previously
+          // saved as may have been renamed or deleted out from under this
+          // session. Recover by saving as a brand new file -- never guess
+          // a renamed key by filename similarity.
+          if (_portalKey != null && _isGraphNotFoundError(error)) {
+            _replaceDocumentWithNewIdentity();
+            portalResult = await _portalService.saveGraph(
               _document,
               portalBlobs,
-              existingKey: _portalKey,
-            )
-          : null;
+              existingKey: null,
+            );
+            recoveredAsNew = true;
+          } else {
+            rethrow;
+          }
+        }
+      }
       if (!mounted) return;
       setState(() {
         if (portalResult != null) _portalKey = portalResult.key;
@@ -4667,10 +4763,19 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         _canvasStatus = portalResult?.message ?? 'Saved on this device';
       });
       if (portalResult != null) notifySalesBrainGraphSaved(portalResult.key);
-      _showCanvasMessage(
-        portalResult?.message ?? 'Graph saved on this device',
-        severity: _CanvasMessageSeverity.success,
-      );
+      if (recoveredAsNew) {
+        _showCanvasMessage(
+          'The previously saved file could not be found in Holloman Ops '
+          'Brain (it may have been renamed or removed) -- saved your '
+          'changes as a new file instead.',
+          severity: _CanvasMessageSeverity.warning,
+        );
+      } else {
+        _showCanvasMessage(
+          portalResult?.message ?? 'Graph saved on this device',
+          severity: _CanvasMessageSeverity.success,
+        );
+      }
     } catch (error) {
       if (!mounted) return;
       _showCanvasMessage(
@@ -4680,27 +4785,94 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
   }
 
-  Future<void> _uploadDocument() async {
+  // "Save & Create Sales Brain Report" (item 14 of the production pass):
+  // saves the current graph to Holloman Ops Brain (reusing the same dirty
+  // guard / overwrite-or-save-as-new / 404-recovery logic as a normal
+  // Save), then navigates the top-level browser to Sales Brain with the
+  // saved graph's billTo/location/key so a human can review and create
+  // the report there. Never generates or sends a report on its own.
+  Future<void> _saveAndCreateSalesBrainReport() async {
     if (!_portalService.isAvailable) {
       _showCanvasMessage(
-        'Upload is available when BugMan Graphs is opened through Holloman Ops Brain',
+        'Creating a Sales Brain report is available when BugMan Graphs '
+        'is opened through Holloman Ops Brain',
         severity: _CanvasMessageSeverity.warning,
       );
       return;
     }
+    final customer = _document.customer;
+    if (customer.pestPacBillToNumber.trim().isEmpty ||
+        customer.pestPacLocationNumber.trim().isEmpty) {
+      _showCanvasMessage(
+        'This graph needs a customer with a Bill-To and Location before '
+        'creating a Sales Brain report',
+        severity: _CanvasMessageSeverity.warning,
+      );
+      return;
+    }
+    if (_portalKey == null) {
+      // Never saved to Ops Brain before -- always save regardless of the
+      // dirty flag, since "no changes yet" still means "not saved yet".
+      await _saveDocument();
+      if (_portalKey == null) return; // save failed
+    } else if (_document.isDirty) {
+      final choice = await _confirmOverwriteOrSaveAsNew();
+      if (choice == null || choice == _SaveConflictChoice.cancel) return;
+      if (choice == _SaveConflictChoice.saveAsNew) {
+        _replaceDocumentWithNewIdentity();
+      }
+      await _saveDocument();
+      if (_portalKey == null) return; // save failed
+    }
+    final url = _portalService.buildSalesBrainReportUrl(
+      billToNumber: customer.pestPacBillToNumber,
+      locationNumber: customer.pestPacLocationNumber,
+      graphKey: _portalKey!,
+    );
+    if (url == null) {
+      _showCanvasMessage(
+        'Sales Brain is not reachable from this session',
+        severity: _CanvasMessageSeverity.error,
+      );
+      return;
+    }
+    navigateToSalesBrainReport(url);
+  }
+
+  // "Save to Ops Brain" > PDF File / PNG File (item 8 of the production
+  // pass): renders the same export bytes as a local Export File download,
+  // but uploads the result into the customer's BugMan Graphs folder in
+  // Holloman Ops Brain instead of downloading it to this device. Never
+  // touches the local device repository or the .bgraph portal key -- this
+  // is a read-only rendered artifact, independent of the editable graph.
+  Future<void> _saveExportToOpsBrain(GraphFileKind kind) async {
+    if (!_portalService.isAvailable) {
+      _showCanvasMessage(
+        'Saving PDF/PNG files to Holloman Ops Brain is available when '
+        'BugMan Graphs is opened through Holloman Ops Brain',
+        severity: _CanvasMessageSeverity.warning,
+      );
+      return;
+    }
+    final kindLabel = kind == GraphFileKind.pdfExport ? 'PDF' : 'PNG';
     try {
-      final blobs = await _collectPortalBlobs();
-      final result = await _portalService.saveGraph(
-        _document,
-        blobs,
-        existingKey: _portalKey,
+      final bytes = await _renderExportBytes(kind);
+      if (bytes == null || !mounted) return;
+      final fileName = buildGraphFileName(
+        _document.customer,
+        _document.createdAt,
+        kind,
+      );
+      final result = await _portalService.uploadGraphExport(
+        customer: _document.customer,
+        fileName: fileName,
+        bytes: bytes,
+        contentType:
+            kind == GraphFileKind.pdfExport ? 'application/pdf' : 'image/png',
+        graphCreatedAt: _document.createdAt,
       );
       if (!mounted) return;
-      setState(() {
-        _portalKey = result.key;
-        _canvasStatus = 'Uploaded to Holloman Ops Brain';
-      });
-      notifySalesBrainGraphSaved(result.key);
+      setState(() => _canvasStatus = result.message);
       _showCanvasMessage(
         result.message,
         severity: _CanvasMessageSeverity.success,
@@ -4708,7 +4880,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     } catch (error) {
       if (!mounted) return;
       _showCanvasMessage(
-        'Graph could not be uploaded: $error',
+        '$kindLabel file could not be saved to Holloman Ops Brain: $error',
         severity: _CanvasMessageSeverity.error,
       );
     }
@@ -5178,114 +5350,32 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     );
   }
 
-  Future<void> _exportGraph() async {
-    final format = await showModalBottomSheet<_GraphExportFormat>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-              title: Text('Export graph'),
-              subtitle:
-                  Text('Exports only the graph content, not empty canvas.'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.picture_as_pdf_outlined),
-              title: const Text('PDF'),
-              subtitle: const Text('Fit graph to a landscape letter page'),
-              onTap: () => Navigator.pop(context, _GraphExportFormat.pdf),
-            ),
-            ListTile(
-              leading: const Icon(Icons.image_outlined),
-              title: const Text('PNG image'),
-              onTap: () => Navigator.pop(context, _GraphExportFormat.png),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (format == null || !mounted) return;
+  // "Export File" > Export PDF / Export PNG (item 8 of the production
+  // pass): local-download-only, never touches Holloman Ops Brain. Each
+  // menu item downloads its format directly (the old combined picker
+  // bottom sheet was replaced by these two explicit menu entries).
+  // Downloads to this device using the standard filename convention
+  // (item 9).
+  Future<void> _exportGraphPdf() => _exportGraphFormat(_GraphExportFormat.pdf);
 
-    final boundary = _canvasBoundaryKey.currentContext?.findRenderObject()
-        as RenderRepaintBoundary?;
-    if (boundary == null) {
-      _showCanvasMessage(
-        'Graph export is not ready yet',
-        severity: _CanvasMessageSeverity.warning,
-      );
-      return;
-    }
+  Future<void> _exportGraphPng() => _exportGraphFormat(_GraphExportFormat.png);
 
+  Future<void> _exportGraphFormat(_GraphExportFormat format) async {
     try {
-      final bounds = ExportBoundsCalculator.forDocument(
-        _document,
-        canvasSize: _canvasSize,
-        structureVisible: _isLayerVisible(_GraphLayer.structure),
-        shapesVisible: _isLayerVisible(_GraphLayer.structure) &&
-            _isLayerVisible(_GraphLayer.shapes),
-        inspectionsVisible: _isLayerVisible(_GraphLayer.inspections),
-        treatmentVisible: _isLayerVisible(_GraphLayer.treatment),
-        photosVisible: _isLayerVisible(_GraphLayer.photos),
-        traceVisible: _traceLayerVisible,
+      final kind = format == _GraphExportFormat.pdf
+          ? GraphFileKind.pdfExport
+          : GraphFileKind.pngExport;
+      final bytes = await _renderExportBytes(kind);
+      if (bytes == null || !mounted) return;
+      final fileName = buildGraphFileName(
+        _document.customer,
+        _document.createdAt,
+        kind,
       );
-      final legend = buildGraphLegend(
-        _annotations,
-        shapes: _shapes,
-        inspectionsVisible: _isLayerVisible(_GraphLayer.inspections),
-        treatmentVisible: _isLayerVisible(_GraphLayer.treatment),
-      );
-      final brandingLogo =
-          (await rootBundle.load('assets/branding/holloman_exterminators.png'))
-              .buffer
-              .asUint8List();
-      final pngBytes = await GraphImageExport.capturePng(
-        boundary,
-        bounds,
-        legend: format == _GraphExportFormat.png ? legend : const [],
-        measurementSummary: format == _GraphExportFormat.png
-            ? _buildExportMeasurementSummary()
-                .map((item) => '${item.label}: ${item.measurements.join(' ')}')
-                .toList(growable: false)
-            : const [],
-        brandingLogo: format == _GraphExportFormat.png ? brandingLogo : null,
-      );
-      final safeName = _document.customer.name
-          .replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '-')
-          .replaceAll(RegExp(r'^-+|-+$'), '');
-      final baseName = safeName.isEmpty ? 'bugman-graph' : safeName;
       final downloaded = switch (format) {
-        _GraphExportFormat.png => downloadGraphPng(
-            pngBytes,
-            '$baseName-graph.png',
-          ),
-        _GraphExportFormat.pdf => downloadGraphFile(
-            await GraphPdfExport.build(
-              graphPng: pngBytes,
-              title: _document.customer.displayName,
-              legend: legend,
-              measurementSummary: _buildExportMeasurementSummary(),
-              brandingLogo: brandingLogo,
-              // Marker-icon glyphs are intentionally NOT embedded in the PDF
-              // legend: the `pdf` package (3.13.0) detects a font's Unicode
-              // support by checking for a raw TrueType `glyf` table
-              // signature, which MaterialIcons-Regular.otf (a CFF-flavored
-              // OpenType font, signature `OTTO`) fails. That misdetection
-              // makes the package try to Latin1-encode the Material Icon's
-              // private-use-area codepoint and throw, which is the root
-              // cause PDF export always failed while PNG export (which
-              // never touches this font) worked. GraphPdfExport.build()
-              // already renders a solid-color square per legend entry when
-              // markerIconFontBytes is omitted, so the legend still reads
-              // correctly without embedding glyphs.
-              photos: _isLayerVisible(_GraphLayer.photos)
-                  ? await _buildPdfPhotos()
-                  : const [],
-            ),
-            '$baseName-graph.pdf',
-            'application/pdf',
-          ),
+        _GraphExportFormat.png => downloadGraphPng(bytes, fileName),
+        _GraphExportFormat.pdf =>
+          downloadGraphFile(bytes, fileName, 'application/pdf'),
       };
       if (!downloaded) {
         _showCanvasMessage('Graph download is available in the web app');
@@ -5298,6 +5388,80 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         severity: _CanvasMessageSeverity.error,
       );
     }
+  }
+
+  // Shared rendering used by both local Export File downloads and
+  // "Save to Ops Brain" PDF File/PNG File uploads (item 8), so the two
+  // paths always produce byte-for-byte identical renders. Returns null
+  // (after showing its own message) when the canvas isn't ready yet;
+  // callers should simply stop in that case.
+  Future<Uint8List?> _renderExportBytes(GraphFileKind kind) async {
+    final boundary = _canvasBoundaryKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null) {
+      _showCanvasMessage(
+        'Graph export is not ready yet',
+        severity: _CanvasMessageSeverity.warning,
+      );
+      return null;
+    }
+
+    final bounds = ExportBoundsCalculator.forDocument(
+      _document,
+      canvasSize: _canvasSize,
+      structureVisible: _isLayerVisible(_GraphLayer.structure),
+      shapesVisible: _isLayerVisible(_GraphLayer.structure) &&
+          _isLayerVisible(_GraphLayer.shapes),
+      inspectionsVisible: _isLayerVisible(_GraphLayer.inspections),
+      treatmentVisible: _isLayerVisible(_GraphLayer.treatment),
+      photosVisible: _isLayerVisible(_GraphLayer.photos),
+      traceVisible: _traceLayerVisible,
+    );
+    final legend = buildGraphLegend(
+      _annotations,
+      shapes: _shapes,
+      inspectionsVisible: _isLayerVisible(_GraphLayer.inspections),
+      treatmentVisible: _isLayerVisible(_GraphLayer.treatment),
+    );
+    final brandingLogo =
+        (await rootBundle.load('assets/branding/holloman_exterminators.png'))
+            .buffer
+            .asUint8List();
+    final isPng = kind == GraphFileKind.pngExport;
+    final pngBytes = await GraphImageExport.capturePng(
+      boundary,
+      bounds,
+      legend: isPng ? legend : const [],
+      measurementSummary: isPng
+          ? _buildExportMeasurementSummary()
+              .map((item) => '${item.label}: ${item.measurements.join(' ')}')
+              .toList(growable: false)
+          : const [],
+      brandingLogo: isPng ? brandingLogo : null,
+    );
+    if (isPng) return pngBytes;
+    return GraphPdfExport.build(
+      graphPng: pngBytes,
+      title: _document.customer.displayName,
+      legend: legend,
+      measurementSummary: _buildExportMeasurementSummary(),
+      brandingLogo: brandingLogo,
+      // Marker-icon glyphs are intentionally NOT embedded in the PDF
+      // legend: the `pdf` package (3.13.0) detects a font's Unicode
+      // support by checking for a raw TrueType `glyf` table
+      // signature, which MaterialIcons-Regular.otf (a CFF-flavored
+      // OpenType font, signature `OTTO`) fails. That misdetection
+      // makes the package try to Latin1-encode the Material Icon's
+      // private-use-area codepoint and throw, which is the root
+      // cause PDF export always failed while PNG export (which
+      // never touches this font) worked. GraphPdfExport.build()
+      // already renders a solid-color square per legend entry when
+      // markerIconFontBytes is omitted, so the legend still reads
+      // correctly without embedding glyphs.
+      photos: _isLayerVisible(_GraphLayer.photos)
+          ? await _buildPdfPhotos()
+          : const [],
+    );
   }
 
   Future<List<GraphPdfPhoto>> _buildPdfPhotos() async {
@@ -6257,9 +6421,15 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onRedo: _redoLastAction,
                           onFinish: _finishWallPath,
                           onClear: _confirmClearGraph,
-                          onSave: _saveDocument,
-                          onExport: _exportGraph,
-                          onUpload: _uploadDocument,
+                          onSaveGraphFile: _handleGraphFileSaveTapped,
+                          onSavePdfFile: () =>
+                              _saveExportToOpsBrain(GraphFileKind.pdfExport),
+                          onSavePngFile: () =>
+                              _saveExportToOpsBrain(GraphFileKind.pngExport),
+                          onExportPdf: _exportGraphPdf,
+                          onExportPng: _exportGraphPng,
+                          onSaveAndCreateSalesBrainReport:
+                              _saveAndCreateSalesBrainReport,
                           onNewWithExistingStructure:
                               _newGraphWithExistingStructure,
                           onZoomIn: () => _zoomBy(1.2),
@@ -6389,9 +6559,12 @@ class _TopEditorToolbar extends StatelessWidget {
     required this.onRedo,
     required this.onFinish,
     required this.onClear,
-    required this.onSave,
-    required this.onExport,
-    required this.onUpload,
+    required this.onSaveGraphFile,
+    required this.onSavePdfFile,
+    required this.onSavePngFile,
+    required this.onExportPdf,
+    required this.onExportPng,
+    required this.onSaveAndCreateSalesBrainReport,
     required this.onNewWithExistingStructure,
     required this.onZoomIn,
     required this.onZoomOut,
@@ -6408,9 +6581,12 @@ class _TopEditorToolbar extends StatelessWidget {
   final VoidCallback onRedo;
   final VoidCallback onFinish;
   final VoidCallback onClear;
-  final VoidCallback onSave;
-  final VoidCallback onExport;
-  final VoidCallback onUpload;
+  final VoidCallback onSaveGraphFile;
+  final VoidCallback onSavePdfFile;
+  final VoidCallback onSavePngFile;
+  final VoidCallback onExportPdf;
+  final VoidCallback onExportPng;
+  final VoidCallback onSaveAndCreateSalesBrainReport;
   final VoidCallback onNewWithExistingStructure;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
@@ -6530,32 +6706,82 @@ class _TopEditorToolbar extends StatelessWidget {
               PopupMenuButton<_EditorFileAction>(
                 tooltip: 'File actions',
                 onSelected: (action) => switch (action) {
-                  _EditorFileAction.save => onSave(),
-                  _EditorFileAction.export => onExport(),
-                  _EditorFileAction.upload => onUpload(),
+                  _EditorFileAction.saveGraphFile => onSaveGraphFile(),
+                  _EditorFileAction.savePdfFile => onSavePdfFile(),
+                  _EditorFileAction.savePngFile => onSavePngFile(),
+                  _EditorFileAction.exportPdf => onExportPdf(),
+                  _EditorFileAction.exportPng => onExportPng(),
+                  _EditorFileAction.saveAndCreateSalesBrainReport =>
+                    onSaveAndCreateSalesBrainReport(),
                   _EditorFileAction.newWithExistingStructure =>
                     onNewWithExistingStructure(),
                 },
                 itemBuilder: (context) => const [
                   PopupMenuItem(
-                    value: _EditorFileAction.save,
+                    enabled: false,
+                    height: 28,
+                    child: Text(
+                      'SAVE TO OPS BRAIN',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _EditorFileAction.saveGraphFile,
                     child: ListTile(
                       leading: Icon(Icons.save_outlined),
-                      title: Text('Save'),
+                      title: Text('Graph File'),
                     ),
                   ),
                   PopupMenuItem(
-                    value: _EditorFileAction.export,
+                    value: _EditorFileAction.savePdfFile,
+                    child: ListTile(
+                      leading: Icon(Icons.picture_as_pdf_outlined),
+                      title: Text('PDF File'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _EditorFileAction.savePngFile,
+                    child: ListTile(
+                      leading: Icon(Icons.image_outlined),
+                      title: Text('PNG File'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _EditorFileAction.saveAndCreateSalesBrainReport,
+                    child: ListTile(
+                      leading: Icon(Icons.receipt_long_outlined),
+                      title: Text('Save & Create Sales Brain Report'),
+                    ),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    enabled: false,
+                    height: 28,
+                    child: Text(
+                      'EXPORT FILE',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _EditorFileAction.exportPdf,
                     child: ListTile(
                       leading: Icon(Icons.ios_share),
-                      title: Text('Export'),
+                      title: Text('Export PDF'),
                     ),
                   ),
                   PopupMenuItem(
-                    value: _EditorFileAction.upload,
+                    value: _EditorFileAction.exportPng,
                     child: ListTile(
-                      leading: Icon(Icons.cloud_upload_outlined),
-                      title: Text('Upload'),
+                      leading: Icon(Icons.ios_share),
+                      title: Text('Export PNG'),
                     ),
                   ),
                   PopupMenuDivider(),
@@ -8468,7 +8694,20 @@ enum _SidePanelMode { properties, layers }
 
 enum _PhotoSource { files, camera }
 
-enum _EditorFileAction { save, export, upload, newWithExistingStructure }
+// Item 10 of the production pass: the user's choice when a Save would
+// otherwise silently overwrite a graph already saved to Holloman Ops
+// Brain.
+enum _SaveConflictChoice { overwrite, saveAsNew, cancel }
+
+enum _EditorFileAction {
+  saveGraphFile,
+  savePdfFile,
+  savePngFile,
+  exportPdf,
+  exportPng,
+  saveAndCreateSalesBrainReport,
+  newWithExistingStructure,
+}
 
 enum _EditorOptionAction {
   grid,
