@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:http/browser_client.dart';
+import 'package:http_parser/http_parser.dart';
 
 import '../models/graph_document.dart';
 import 'bugman_portal_service.dart';
@@ -41,11 +42,52 @@ class HttpBugManPortalService implements BugManPortalService {
       );
 
   @override
-  Future<PortalUploadResult> uploadGraph(
-    GraphDocument document,
-    Map<String, Uint8List> blobs,
-  ) =>
-      _sendGraph('/api/bugman-graphs/upload', document, blobs);
+  Future<PortalUploadResult> uploadGraphExport({
+    required GraphCustomerInfo customer,
+    required String fileName,
+    required Uint8List bytes,
+    required String contentType,
+    required DateTime graphCreatedAt,
+  }) async {
+    final uri = Uri.parse('$_apiOrigin/upload');
+    final request = http.MultipartRequest('POST', uri)
+      ..fields['scope'] = 'customer'
+      ..fields['folder'] = 'bugman-graphs'
+      ..fields['billToNumber'] = customer.pestPacBillToNumber
+      ..fields['locationNumber'] = customer.pestPacLocationNumber
+      // Only used as a fallback by the server if the customer's location
+      // folder doesn't already exist yet -- normal case is that it does,
+      // since a graph can't exist for a customer without one.
+      ..fields['billToName'] = customer.name
+      ..fields['locationName'] = customer.serviceAddress
+      // Item 15: enriches the generic upload's R2 metadata with the same
+      // canonical Bill-To/Location/graph fields the .bgraph save path
+      // already writes via bugManGraphMetadata() server-side, restricted
+      // to the whitelist the server accepts (see uploadFile() in
+      // functions/api/[[path]].js).
+      ..fields['extraMetadata'] = jsonEncode({
+        'customerName': customer.name,
+        'serviceAddress': customer.serviceAddress,
+        'graphType': customer.serviceType,
+        'graphedBy': customer.createdBy,
+        'originalGraphCreatedAt': graphCreatedAt.toIso8601String(),
+      })
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          'files',
+          bytes,
+          filename: fileName,
+          contentType: MediaType.parse(contentType),
+        ),
+      );
+    final streamedResponse = await _client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
+    final payload = _decodeResponse(response);
+    return PortalUploadResult(
+      key: payload['key']?.toString() ?? '',
+      message: payload['message']?.toString() ?? 'File uploaded.',
+    );
+  }
 
   Future<PortalUploadResult> _sendGraph(
     String path,
@@ -103,6 +145,23 @@ class HttpBugManPortalService implements BugManPortalService {
       blobs: blobs,
       name: payload['name']?.toString() ?? 'BugMan Graph',
     );
+  }
+
+  @override
+  String? buildSalesBrainReportUrl({
+    required String billToNumber,
+    required String locationNumber,
+    required String graphKey,
+  }) {
+    if (!isAvailable) return null;
+    final uri = Uri.parse('$_apiOrigin/sales-brain/').replace(
+      queryParameters: {
+        'billTo': billToNumber,
+        'location': locationNumber,
+        'graphKey': graphKey,
+      },
+    );
+    return uri.toString();
   }
 
   Map<String, dynamic> _decodeResponse(http.Response response) {

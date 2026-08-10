@@ -22,9 +22,20 @@ class UnavailableBugManPortalService implements BugManPortalService {
       Future.error(UnsupportedError('Holloman Ops Brain is unavailable.'));
 
   @override
-  Future<PortalUploadResult> uploadGraph(
-    GraphDocument document,
-    Map<String, Uint8List> blobs,
-  ) =>
+  Future<PortalUploadResult> uploadGraphExport({
+    required GraphCustomerInfo customer,
+    required String fileName,
+    required Uint8List bytes,
+    required String contentType,
+    required DateTime graphCreatedAt,
+  }) =>
       Future.error(UnsupportedError('Holloman Ops Brain is unavailable.'));
+
+  @override
+  String? buildSalesBrainReportUrl({
+    required String billToNumber,
+    required String locationNumber,
+    required String graphKey,
+  }) =>
+      null;
 }

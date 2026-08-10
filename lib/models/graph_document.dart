@@ -540,6 +540,75 @@ class GraphAttachment {
       };
 }
 
+/// The three storable file "kinds" for a graph (item 9 of the production
+/// pass): the editable `.bgraph` JSON document, and the two read-only
+/// rendered export formats. Each carries its own filename suffix and
+/// extension so [buildGraphFileName] can produce the exact same name for a
+/// given kind regardless of whether it's being saved to Ops Brain or
+/// exported locally.
+enum GraphFileKind {
+  bgraph('BGRAPH', 'bgraph'),
+  pdfExport('PDFEXPORT', 'pdf'),
+  pngExport('PNGEXPORT', 'png');
+
+  const GraphFileKind(this.suffix, this.extension);
+
+  final String suffix;
+  final String extension;
+}
+
+/// Mirrors holloman-ops-brain's server-side `bugManGraphFileName()` /
+/// `sanitizeBugManFileSegment()` / `formatBugManFileDate()` (see
+/// functions/api/[[path]].js) exactly, so a graph filename is identical
+/// whether it's built here on the client (for local exports) or recomputed
+/// on the server when saving/uploading. Do not change this format without
+/// updating the server-side implementation to match.
+///
+/// Uses [createdAt] -- the graph's original Creation Date, never
+/// last-modified -- per item 9 of the production pass.
+String buildGraphFileName(
+  GraphCustomerInfo customer,
+  DateTime createdAt,
+  GraphFileKind kind,
+) {
+  final datePart = _formatBugManFileDate(createdAt);
+  final segments = <String>[
+    datePart,
+    _sanitizeBugManFileSegment(customer.pestPacBillToNumber),
+    _sanitizeBugManFileSegment(customer.name),
+    _sanitizeBugManFileSegment(customer.serviceType),
+    _sanitizeBugManFileSegment(customer.createdBy),
+  ].where((segment) => segment.isNotEmpty).toList();
+  segments.add(kind.suffix);
+  return _safeFileName('${segments.join('-')}.${kind.extension}');
+}
+
+String _formatBugManFileDate(DateTime date) {
+  final mm = date.month.toString().padLeft(2, '0');
+  final dd = date.day.toString().padLeft(2, '0');
+  final yy = (date.year % 100).toString().padLeft(2, '0');
+  return '$mm-$dd-$yy';
+}
+
+String _sanitizeBugManFileSegment(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return '';
+  final hyphenated = trimmed.replaceAll(RegExp(r'\s+'), '-');
+  final cleaned = hyphenated.replaceAll(RegExp(r'[^A-Za-z0-9-]'), '');
+  return cleaned
+      .replaceAll(RegExp(r'-+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+}
+
+String _safeFileName(String value) {
+  final trimmed = value.trim().isEmpty ? 'file' : value.trim();
+  final cleaned = trimmed
+      .replaceAll(RegExp(r'[\\/<>:"|?*\x00-\x1F]+'), '-')
+      .replaceAll(RegExp(r'\s+'), ' ');
+  final sliced = cleaned.length > 180 ? cleaned.substring(0, 180) : cleaned;
+  return sliced.isEmpty ? 'file' : sliced;
+}
+
 String newGraphId() {
   final random = math.Random.secure();
   final suffix = List.generate(
