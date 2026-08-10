@@ -545,28 +545,45 @@ void main() {
 
     expect(find.byTooltip('Undo'), findsOneWidget);
     expect(find.byTooltip('Redo'), findsOneWidget);
-    expect(find.text('Save'), findsNothing);
-    expect(find.text('Export'), findsNothing);
-    expect(find.text('Upload'), findsNothing);
+    expect(find.text('Graph File'), findsNothing);
+    expect(find.text('Export PDF'), findsNothing);
     expect(find.text('20:1'), findsNothing);
 
     await tester.tap(find.byTooltip('File actions'));
     await tester.pumpAndSettle();
-    expect(find.text('Save'), findsOneWidget);
-    expect(find.text('Export'), findsOneWidget);
-    expect(find.text('Upload'), findsOneWidget);
-    await tester.tap(find.text('Upload'));
+    expect(find.text('SAVE TO OPS BRAIN'), findsOneWidget);
+    expect(find.text('Graph File'), findsOneWidget);
+    expect(find.text('PDF File'), findsOneWidget);
+    expect(find.text('PNG File'), findsOneWidget);
+    expect(find.text('Save & Create Sales Brain Report'), findsOneWidget);
+    expect(find.text('EXPORT FILE'), findsOneWidget);
+    expect(find.text('Export PDF'), findsOneWidget);
+    expect(find.text('Export PNG'), findsOneWidget);
+    expect(find.text('+ New w/ Existing Structure'), findsOneWidget);
+
+    // No BugMan Graphs portal is wired up for a bare _pumpEditor() session,
+    // so a "Save to Ops Brain" action warns instead of silently no-op-ing.
+    await tester.tap(find.text('Graph File'));
     await tester.pump();
+    expect(find.text('No changes to save'), findsOneWidget);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('File actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('PDF File'));
+    await tester.pumpAndSettle();
     expect(
       find.text(
-        'Upload is available when BugMan Graphs is opened through Holloman Ops Brain',
+        'Saving PDF/PNG files to Holloman Ops Brain is available when '
+        'BugMan Graphs is opened through Holloman Ops Brain',
       ),
       findsOneWidget,
     );
     await tester.pump(const Duration(seconds: 2));
     expect(
       find.text(
-        'Upload is available when BugMan Graphs is opened through Holloman Ops Brain',
+        'Saving PDF/PNG files to Holloman Ops Brain is available when '
+        'BugMan Graphs is opened through Holloman Ops Brain',
       ),
       findsOneWidget,
     );
@@ -579,50 +596,65 @@ void main() {
     expect(find.text('20:1'), findsNothing);
   });
 
-  testWidgets('Save and Upload update the same Ops Brain graph key',
-      (tester) async {
+  Future<void> chooseFileAction(WidgetTester tester, String label) async {
+    await tester.tap(find.byTooltip('File actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(label));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+      'Graph File save is a no-op when clean, and reuses the same Ops '
+      'Brain key on repeat saves (item 10)', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(910, 794);
     addTearDown(tester.view.reset);
     final portal = _FakeBugManPortalService();
+    final job = Job(
+      customerName: 'Save Test',
+      serviceAddress: '',
+      pestPacLocationNumber: '',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 8, 6),
+    );
+    final document = GraphDocument.forJob(job);
     await tester.pumpWidget(
       MaterialApp(
-        home: GraphCanvasScreen(
-          job: Job(
-            customerName: 'Save Test',
-            serviceAddress: '',
-            pestPacLocationNumber: '',
-            pestPacBillToNumber: '',
-            serviceType: 'Inspection',
-            createdBy: 'Widget Test',
-            createdDate: DateTime(2026, 8, 6),
-          ),
-          portalService: portal,
-        ),
+        home: GraphCanvasScreen(document: document, portalService: portal),
       ),
     );
     await tester.pumpAndSettle();
 
-    Future<void> chooseFileAction(String label) async {
-      await tester.tap(find.byTooltip('File actions'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text(label));
-      await tester.pumpAndSettle();
-    }
+    // A brand new, untouched graph has nothing to save yet.
+    await chooseFileAction(tester, 'Graph File');
+    expect(find.text('No changes to save'), findsOneWidget);
+    expect(portal.saveCallCount, 0);
 
-    await chooseFileAction('Save');
-    await chooseFileAction('Save');
+    // Dirty the document, then Save creates the first Ops Brain file.
+    document.setLayer('trace', const GraphLayerState(visible: true));
+    await chooseFileAction(tester, 'Graph File');
+    expect(portal.saveExistingKeys, [null]);
+
+    // Dirty it again and Save again -- same key gets overwritten (no
+    // conflict dialog appears the very first time a document that was
+    // just created this save round is re-saved with the same key... but
+    // once _portalKey is already set, a second dirty save must prompt).
+    document.setLayer('trace', const GraphLayerState(visible: false));
+    await tester.tap(find.byTooltip('File actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Graph File'));
+    await tester.pumpAndSettle();
+    expect(find.text('Save changes'), findsOneWidget);
+    await tester.tap(find.text('Overwrite Existing'));
+    await tester.pumpAndSettle();
     expect(portal.saveExistingKeys, [null, portal.savedKey]);
-
-    await chooseFileAction('Upload');
-    await chooseFileAction('Save');
-    expect(portal.uploadCount, 0);
-    expect(portal.saveExistingKeys,
-        [null, portal.savedKey, portal.savedKey, portal.savedKey]);
   });
 
-  testWidgets('Upload creates once and an opened graph keeps its Ops Brain key',
-      (tester) async {
+  testWidgets(
+      'Save As New gives the graph a fresh identity and Ops Brain key '
+      '(item 10/11)', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(910, 794);
     addTearDown(tester.view.reset);
@@ -636,38 +668,254 @@ void main() {
       createdBy: 'Widget Test',
       createdDate: DateTime(2026, 8, 6),
     );
-
-    await tester.pumpWidget(MaterialApp(
-      home: GraphCanvasScreen(
-        key: const ValueKey('new-graph'),
-        job: job,
-        portalService: portal,
-      ),
-    ));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('File actions'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Upload'));
-    await tester.pumpAndSettle();
-    expect(portal.saveExistingKeys, [null]);
-
     const originalKey =
         'company/BugMan Graphs Uploads/original-existing-graph.bgraph';
+    final document = GraphDocument.forJob(job);
     await tester.pumpWidget(MaterialApp(
       home: GraphCanvasScreen(
-        key: const ValueKey('opened-graph'),
-        document: GraphDocument.forJob(job),
+        document: document,
         portalService: portal,
         portalKey: originalKey,
       ),
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('File actions'));
+
+    document.setLayer('trace', const GraphLayerState(visible: true));
+    await chooseFileAction(tester, 'Graph File');
+    expect(find.text('Save changes'), findsOneWidget);
+    await tester.tap(find.text('Save As New'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Save'));
+
+    // Saved as a new file -- the existing key was never touched.
+    expect(portal.saveExistingKeys, [null]);
+    expect(portal.saveExistingKeys.contains(originalKey), isFalse);
+  });
+
+  testWidgets(
+      'a missing Ops Brain graph recovers by saving as a new file '
+      '(item 11 renamed-key recovery)', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(910, 794);
+    addTearDown(tester.view.reset);
+    final portal = _FakeBugManPortalService();
+    const staleKey = 'company/BugMan Graphs Uploads/renamed-away.bgraph';
+    portal.notFoundExistingKeys.add(staleKey);
+    final job = Job(
+      customerName: 'Renamed Key Test',
+      serviceAddress: '',
+      pestPacLocationNumber: '',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 8, 6),
+    );
+    final document = GraphDocument.forJob(job);
+    await tester.pumpWidget(MaterialApp(
+      home: GraphCanvasScreen(
+        document: document,
+        portalService: portal,
+        portalKey: staleKey,
+      ),
+    ));
     await tester.pumpAndSettle();
-    expect(portal.saveExistingKeys.last, originalKey);
-    expect(portal.uploadCount, 0);
+
+    document.setLayer('trace', const GraphLayerState(visible: true));
+    await chooseFileAction(tester, 'Graph File');
+    expect(find.text('Save changes'), findsOneWidget);
+    await tester.tap(find.text('Overwrite Existing'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('could not be found in Holloman Ops Brain'),
+      findsOneWidget,
+    );
+    expect(portal.saveExistingKeys, [staleKey, null]);
+  });
+
+  Future<void> chooseFileActionAndAwaitAsyncWork(
+    WidgetTester tester,
+    String label,
+  ) async {
+    await tester.runAsync(() async {
+      await tester.tap(find.byTooltip('File actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+      await tester.pump();
+      // The PDF/PNG render pipeline (image capture + PDF assembly) does
+      // real async work that only progresses under runAsync's real
+      // event loop, not the fake-async test clock, so poll with real
+      // delays instead of pumpAndSettle here.
+      for (var i = 0; i < 30; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await tester.pump();
+      }
+    });
+  }
+
+  testWidgets(
+      'PDF File and PNG File save rendered exports to Ops Brain, while '
+      'Export PDF/PNG stay local-only (item 8)', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final portal = _FakeBugManPortalService();
+    final job = Job(
+      customerName: 'Export Upload Test',
+      serviceAddress: '',
+      pestPacLocationNumber: 'LOC-9',
+      pestPacBillToNumber: 'BILL-9',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 8, 6),
+    );
+    final document = GraphDocument.forJob(job);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GraphCanvasScreen(document: document, portalService: portal),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await chooseFileActionAndAwaitAsyncWork(tester, 'PDF File');
+    expect(portal.uploadExportCalls, hasLength(1));
+    expect(portal.uploadExportCalls.single['contentType'], 'application/pdf');
+    expect(
+      portal.uploadExportCalls.single['fileName'],
+      buildGraphFileName(
+        document.customer,
+        document.createdAt,
+        GraphFileKind.pdfExport,
+      ),
+    );
+
+    await chooseFileActionAndAwaitAsyncWork(tester, 'PNG File');
+    expect(portal.uploadExportCalls, hasLength(2));
+    expect(portal.uploadExportCalls.last['contentType'], 'image/png');
+    expect(
+      portal.uploadExportCalls.last['fileName'],
+      buildGraphFileName(
+        document.customer,
+        document.createdAt,
+        GraphFileKind.pngExport,
+      ),
+    );
+
+    // Export PDF / Export PNG never touch the Ops Brain portal -- they
+    // only trigger a local browser download attempt (which reports
+    // "Graph download is available in the web app" outside a real web
+    // build) and leave uploadExportCalls untouched.
+    await chooseFileActionAndAwaitAsyncWork(tester, 'Export PDF');
+    expect(portal.uploadExportCalls, hasLength(2));
+
+    await chooseFileActionAndAwaitAsyncWork(tester, 'Export PNG');
+    expect(portal.uploadExportCalls, hasLength(2));
+  });
+
+  testWidgets(
+      'Saving PDF/PNG to Ops Brain is unavailable outside Holloman Ops '
+      'Brain, and never calls uploadGraphExport (item 8)', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final portal = _FakeBugManPortalService()..available = false;
+    final job = Job(
+      customerName: 'Unavailable Portal Test',
+      serviceAddress: '',
+      pestPacLocationNumber: '',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 8, 6),
+    );
+    final document = GraphDocument.forJob(job);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GraphCanvasScreen(document: document, portalService: portal),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await chooseFileAction(tester, 'PNG File');
+    expect(
+      find.text(
+        'Saving PDF/PNG files to Holloman Ops Brain is available when '
+        'BugMan Graphs is opened through Holloman Ops Brain',
+      ),
+      findsOneWidget,
+    );
+    expect(portal.uploadExportCalls, isEmpty);
+  });
+
+  testWidgets(
+      'Save & Create Sales Brain Report saves the graph then navigates to '
+      'the resolved Sales Brain URL (item 14)', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final portal = _FakeBugManPortalService();
+    final job = Job(
+      customerName: 'Sales Brain Handoff Test',
+      serviceAddress: '1 Handoff Way',
+      pestPacLocationNumber: 'LOC-42',
+      pestPacBillToNumber: 'BILL-77',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 8, 6),
+    );
+    final document = GraphDocument.forJob(job);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GraphCanvasScreen(document: document, portalService: portal),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // A never-yet-saved graph still gets its first Ops Brain save before
+    // navigating, even though isDirty may be false for a freshly created
+    // document -- "no Ops Brain key yet" is not the same thing as
+    // "nothing to save".
+    await tester.runAsync(() async {
+      await chooseFileAction(tester, 'Save & Create Sales Brain Report');
+    });
+
+    expect(portal.saveCallCount, 1);
+    expect(portal.saveExistingKeys, [null]);
+  });
+
+  testWidgets(
+      'Save & Create Sales Brain Report warns instead of navigating when '
+      'PestPac identifiers are missing (item 14)', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final portal = _FakeBugManPortalService();
+    final job = Job(
+      customerName: 'No PestPac IDs Test',
+      serviceAddress: '',
+      pestPacLocationNumber: '',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 8, 6),
+    );
+    final document = GraphDocument.forJob(job);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GraphCanvasScreen(document: document, portalService: portal),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await chooseFileAction(tester, 'Save & Create Sales Brain Report');
+
+    expect(portal.saveCallCount, 0);
+    expect(
+      find.textContaining(
+        'needs a customer with a Bill-To and Location before creating a '
+        'Sales Brain report',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('scale options update the canvas transformation', (tester) async {
@@ -1403,12 +1651,17 @@ class _FakePhotoPicker implements GraphPhotoPicker {
 
 class _FakeBugManPortalService implements BugManPortalService {
   final savedKey = 'company/BugMan Graphs Uploads/saved.bgraph';
-  final uploadedKey = 'company/BugMan Graphs Uploads/uploaded.bgraph';
   final saveExistingKeys = <String?>[];
-  int uploadCount = 0;
+  final uploadExportCalls = <Map<String, Object?>>[];
+  // Item 11: keys in this set make the next saveGraph() call with that
+  // existingKey throw the exact server 404 error text, so tests can
+  // exercise the "Saved graph not found" recovery path.
+  final notFoundExistingKeys = <String>{};
+  bool available = true;
+  int saveCallCount = 0;
 
   @override
-  bool get isAvailable => true;
+  bool get isAvailable => available;
 
   @override
   Future<PortalGraphPackage> loadGraph(String key) =>
@@ -1420,7 +1673,11 @@ class _FakeBugManPortalService implements BugManPortalService {
     Map<String, Uint8List> blobs, {
     String? existingKey,
   }) async {
+    saveCallCount += 1;
     saveExistingKeys.add(existingKey);
+    if (existingKey != null && notFoundExistingKeys.contains(existingKey)) {
+      throw Exception('Saved graph not found.');
+    }
     return PortalUploadResult(
       key: existingKey ?? savedKey,
       message: 'Graph saved to Ops Brain.',
@@ -1428,14 +1685,35 @@ class _FakeBugManPortalService implements BugManPortalService {
   }
 
   @override
-  Future<PortalUploadResult> uploadGraph(
-    GraphDocument document,
-    Map<String, Uint8List> blobs,
-  ) async {
-    uploadCount += 1;
+  Future<PortalUploadResult> uploadGraphExport({
+    required GraphCustomerInfo customer,
+    required String fileName,
+    required Uint8List bytes,
+    required String contentType,
+    required DateTime graphCreatedAt,
+  }) async {
+    uploadExportCalls.add({
+      'customer': customer,
+      'fileName': fileName,
+      'bytes': bytes,
+      'contentType': contentType,
+      'graphCreatedAt': graphCreatedAt,
+    });
     return PortalUploadResult(
-      key: uploadedKey,
-      message: 'Graph uploaded to Ops Brain.',
+      key: 'company/BugMan Graphs Uploads/$fileName',
+      message: '$fileName saved to Ops Brain.',
     );
+  }
+
+  @override
+  String? buildSalesBrainReportUrl({
+    required String billToNumber,
+    required String locationNumber,
+    required String graphKey,
+  }) {
+    if (!available) return null;
+    final encodedKey = Uri.encodeQueryComponent(graphKey);
+    return 'https://ops.holloman-ext.com/sales-brain/'
+        '?billTo=$billToNumber&location=$locationNumber&graphKey=$encodedKey';
   }
 }

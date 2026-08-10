@@ -397,4 +397,51 @@ void main() {
     expect(copy.annotations, hasLength(1));
     expect(copy.annotations.single.markerType, GraphMarkerType.moisture);
   });
+
+  test(
+      'buildGraphFileName matches holloman-ops-brain\'s server-side format '
+      'for every file kind (item 9)', () {
+    const customer = GraphCustomerInfo(
+      name: 'Ada  Customer!!',
+      serviceAddress: '1 Graph Lane',
+      pestPacLocationNumber: 'LOC-100',
+      pestPacBillToNumber: 'BILL-200',
+      serviceType: 'Inspection',
+      createdBy: 'J. Inspector',
+    );
+    final createdAt = DateTime(2026, 7, 14);
+
+    // MM-DD-YY, then sanitized BillTo-Name-ServiceType-CreatedBy segments,
+    // then the kind suffix and extension -- mirrors
+    // bugManGraphFileName()/sanitizeBugManFileSegment()/
+    // formatBugManFileDate() in holloman-ops-brain's
+    // functions/api/[[path]].js exactly.
+    expect(
+      buildGraphFileName(customer, createdAt, GraphFileKind.bgraph),
+      '07-14-26-BILL-200-Ada-Customer-Inspection-J-Inspector-BGRAPH.bgraph',
+    );
+    expect(
+      buildGraphFileName(customer, createdAt, GraphFileKind.pdfExport),
+      '07-14-26-BILL-200-Ada-Customer-Inspection-J-Inspector-PDFEXPORT.pdf',
+    );
+    expect(
+      buildGraphFileName(customer, createdAt, GraphFileKind.pngExport),
+      '07-14-26-BILL-200-Ada-Customer-Inspection-J-Inspector-PNGEXPORT.png',
+    );
+
+    // Blank optional segments (e.g. no BillTo) are dropped rather than
+    // leaving stray double-hyphens in the filename.
+    const noBillTo = GraphCustomerInfo(
+      name: 'Ada Customer',
+      serviceAddress: '1 Graph Lane',
+      pestPacLocationNumber: 'LOC-100',
+      pestPacBillToNumber: '',
+      serviceType: 'Inspection',
+      createdBy: 'Inspector',
+    );
+    expect(
+      buildGraphFileName(noBillTo, createdAt, GraphFileKind.bgraph),
+      '07-14-26-Ada-Customer-Inspection-Inspector-BGRAPH.bgraph',
+    );
+  });
 }
