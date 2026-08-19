@@ -39,6 +39,60 @@ void main() {
     expect(theme.colorScheme.onPrimary, AppColors.white);
   });
 
+  testWidgets(
+      'presentation mode is read-only and only paints approved finding markers',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(tester.view.reset);
+    final job = Job(
+      customerName: 'Customer Presentation',
+      serviceAddress: '1 Structure Way',
+      pestPacLocationNumber: 'LOC-1',
+      pestPacBillToNumber: 'BILL-1',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 8, 19),
+    );
+    final document = GraphDocument(
+      id: job.id,
+      customer: GraphCustomerInfo.fromJob(job),
+      annotations: const [
+        GraphAnnotation(
+            id: 'approved',
+            kind: GraphAnnotationKind.marker,
+            point: GraphPoint(x: 120, y: 140),
+            label: 'AT',
+            markerType: GraphMarkerType.activeTermites),
+        GraphAnnotation(
+            id: 'internal',
+            kind: GraphAnnotationKind.marker,
+            point: GraphPoint(x: 220, y: 240),
+            label: 'TT',
+            markerType: GraphMarkerType.trenchAndTreat),
+        GraphAnnotation(
+            id: 'note',
+            kind: GraphAnnotationKind.text,
+            point: GraphPoint(x: 320, y: 340),
+            label: 'Staff note'),
+      ],
+    )..markClean();
+
+    await tester.pumpWidget(MaterialApp(
+        home: GraphCanvasScreen(
+            document: document,
+            presentationMode: true,
+            presentationMarkerIds: const {'approved'})));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CanvasToolbar), findsNothing);
+    expect(find.byTooltip('File actions'), findsNothing);
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    final annotations =
+        _graphOverlayPainter(tester).annotations as List<dynamic>;
+    expect(annotations.map((item) => item.id), ['approved']);
+  });
+
   testWidgets('New Job shows optional metadata fields and approved services',
       (tester) async {
     tester.view.devicePixelRatio = 1;

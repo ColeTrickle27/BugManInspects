@@ -30,6 +30,14 @@ class _BugManGraphsAppState extends State<BugManGraphsApp> {
   late final CustomerFilesService _customerFilesService =
       createCustomerFilesService();
   late final String? _portalKey = _readPortalKey();
+  late final bool _presentationMode =
+      Uri.base.queryParameters['mode'] == 'presentation';
+  late final Set<String> _presentationMarkerIds = Uri
+          .base.queryParametersAll['marker']
+          ?.map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toSet() ??
+      const <String>{};
   late final Future<GraphDocument?>? _portalGraph =
       _portalKey == null ? null : _loadPortalGraph(_portalKey);
   late final _JobPreselectionRequest? _jobPreselectionRequest =
@@ -62,7 +70,10 @@ class _BugManGraphsAppState extends State<BugManGraphsApp> {
     final params = Uri.base.queryParameters;
     final billTo = params['billTo']?.trim();
     final location = params['location']?.trim();
-    if (billTo == null || billTo.isEmpty || location == null || location.isEmpty) {
+    if (billTo == null ||
+        billTo.isEmpty ||
+        location == null ||
+        location.isEmpty) {
       return null;
     }
     return _JobPreselectionRequest(billTo: billTo, location: location);
@@ -129,6 +140,8 @@ class _BugManGraphsAppState extends State<BugManGraphsApp> {
                   document: snapshot.data!,
                   repository: _repository,
                   portalKey: _portalKey,
+                  presentationMode: _presentationMode,
+                  presentationMarkerIds: _presentationMarkerIds,
                 );
               },
             )
