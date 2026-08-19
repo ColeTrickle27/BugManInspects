@@ -54,6 +54,8 @@ class GraphCanvasScreen extends StatefulWidget {
     this.portalService,
     this.portalKey,
     this.markerDefaultsStore,
+    this.presentationMode = false,
+    this.presentationMarkerIds = const <String>{},
     super.key,
   }) : assert(job != null || document != null);
 
@@ -66,6 +68,8 @@ class GraphCanvasScreen extends StatefulWidget {
   final BugManPortalService? portalService;
   final String? portalKey;
   final MarkerDefaultsStore? markerDefaultsStore;
+  final bool presentationMode;
+  final Set<String> presentationMarkerIds;
 
   @override
   State<GraphCanvasScreen> createState() => _GraphCanvasScreenState();
@@ -6202,6 +6206,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.presentationMode) {
+      return _buildPresentationView(context);
+    }
     const sidePanelWidth = 268.0;
     const canvasRightInset = 12.0;
     const canvasLeftInset = 12.0;
@@ -6539,6 +6546,71 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPresentationView(BuildContext context) {
+    final visibleAnnotations = _annotations
+        .where((annotation) =>
+            annotation.kind == GraphAnnotationKind.marker &&
+            widget.presentationMarkerIds.contains(annotation.id))
+        .toList(growable: false);
+
+    return Scaffold(
+      appBar: AppBar(
+        toolbarHeight: 40,
+        automaticallyImplyLeading: false,
+        title: Text(_document.customer.displayName),
+      ),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            _centerCanvasInViewport(constraints.biggest);
+            return InteractiveViewer(
+              transformationController: _transformationController,
+              panEnabled: true,
+              scaleEnabled: true,
+              constrained: false,
+              minScale: 0.25,
+              maxScale: 10,
+              boundaryMargin: const EdgeInsets.all(1200),
+              child: _CanvasSurface(
+                canvasSize: _canvasSize,
+                wallSegments: _wallSegments,
+                annotations: visibleAnnotations,
+                shapes: _shapes,
+                freehandStrokes: const <FreehandStroke>[],
+                traces: const <TraceGeometry>[],
+                draftFreehandPoints: const <GraphPoint>[],
+                previewShapeSegments: const <WallSegment>[],
+                previewShape: null,
+                hiddenSegmentIndexes: _shapeSegmentIndexSet,
+                gridVisible: false,
+                selectedSegmentIndex: null,
+                selectedAnnotationIndex: null,
+                selectedShapeIndex: null,
+                selectedFreehandIndex: null,
+                selectedTraceIndex: null,
+                hoveredSegmentIndex: null,
+                hoveredAnnotationIndex: null,
+                hoveredShapeIndex: null,
+                hoveredFreehandIndex: null,
+                hoveredTraceIndex: null,
+                activeWallStart: null,
+                previewSegment: null,
+                treatmentCalloutTip: null,
+                treatmentCalloutBox: null,
+                structureVisible: true,
+                shapesVisible: true,
+                inspectionsVisible: true,
+                treatmentVisible: false,
+                photosVisible: false,
+                traceLayerVisible: false,
+              ),
+            );
+          },
         ),
       ),
     );
