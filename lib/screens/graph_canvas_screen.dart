@@ -25,6 +25,7 @@ import '../services/bugman_portal_service.dart';
 import '../services/graph_export_legend.dart';
 import '../services/graph_image_export.dart';
 import '../services/measurement_format.dart';
+import '../services/measurement_service.dart';
 import '../services/graph_pdf_export.dart';
 import '../services/graph_photo_optimizer_factory.dart';
 import '../services/graph_photo_service.dart';
@@ -4540,7 +4541,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       final traceIndex = editIndex ?? nextTraces.length - 1;
       _selection = _Selection.trace(traceIndex);
       _interaction.setSelected(_interactionReference(_selection!));
-      _selectedTool = CanvasTool.select;
+      _interaction.selectTool(CanvasTool.select);
       _sidePanelMode = _SidePanelMode.properties;
       _canvasStatus = 'Satellite trace added at real-world scale';
     });
