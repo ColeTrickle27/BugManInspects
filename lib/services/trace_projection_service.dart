@@ -21,7 +21,7 @@ class TraceProjectionService {
   static TraceProjectionResult projectToCanvas(
     List<GeoPoint> points, {
     required Size canvasSize,
-    double padding = 320,
+    double metersPerCanvasUnit = 0.3048 / 24,
   }) {
     if (points.isEmpty) {
       return const TraceProjectionResult(
@@ -53,12 +53,17 @@ class TraceProjectionService {
     final bottom = projected.map((point) => point.dy).reduce(math.max);
     final widthMeters = math.max(right - left, 0.01);
     final heightMeters = math.max(bottom - top, 0.01);
-    final availableWidth = math.max(canvasSize.width - (padding * 2), 1);
-    final availableHeight = math.max(canvasSize.height - (padding * 2), 1);
-    final canvasUnitsPerMeter = math.min(
-      availableWidth / widthMeters,
-      availableHeight / heightMeters,
-    );
+    if (!metersPerCanvasUnit.isFinite || metersPerCanvasUnit <= 0) {
+      throw ArgumentError.value(
+        metersPerCanvasUnit,
+        'metersPerCanvasUnit',
+        'must be finite and greater than zero',
+      );
+    }
+    // Use the graph editor's established 24 canvas units per foot scale. The
+    // viewport can zoom to fit the result without changing its measured size
+    // relative to walls, the grid, or other canvas geometry.
+    final canvasUnitsPerMeter = 1 / metersPerCanvasUnit;
     final renderedWidth = widthMeters * canvasUnitsPerMeter;
     final renderedHeight = heightMeters * canvasUnitsPerMeter;
     final offsetX = (canvasSize.width - renderedWidth) / 2;
@@ -71,7 +76,7 @@ class TraceProjectionService {
             y: offsetY + ((point.dy - top) * canvasUnitsPerMeter),
           ),
       ],
-      metersPerCanvasUnit: 1 / canvasUnitsPerMeter,
+      metersPerCanvasUnit: metersPerCanvasUnit,
     );
   }
 
