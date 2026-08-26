@@ -4530,12 +4530,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         const _LayerSettings(visible: true),
       );
       _document.setMeasurementCalibration(
-        const MeasurementCalibration(
+        MeasurementCalibration(
           source: MeasurementSource.mapGeodesic,
           status: MeasurementAccuracyStatus.estimated,
+          metersPerCanvasUnit: trace.metersPerCanvasUnit,
           note: 'Measurements derived from geographic trace points',
         ),
       );
+      final traceIndex = editIndex ?? nextTraces.length - 1;
+      _selection = _Selection.trace(traceIndex);
+      _interaction.setSelected(_interactionReference(_selection!));
+      _selectedTool = CanvasTool.select;
+      _sidePanelMode = _SidePanelMode.properties;
       _canvasStatus = 'Satellite trace added at real-world scale';
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -6012,6 +6018,21 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     });
   }
 
+  void _updateTraceLabel(int index, String label) {
+    if (index < 0 ||
+        index >= _traces.length ||
+        _isLayerLocked(_GraphLayer.trace)) {
+      return;
+    }
+    _recordSnapshotUndo();
+    final nextTraces = <TraceGeometry>[..._traces];
+    nextTraces[index] = nextTraces[index].copyWith(label: label);
+    setState(() {
+      _document.replaceTraces(nextTraces);
+      _canvasStatus = 'Trace label updated';
+    });
+  }
+
   void _updateShapeFill(int index, Color? fillColor) {
     if (index < 0 || index >= _shapes.length) {
       return;
@@ -6499,6 +6520,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           wallSegments: _wallSegments,
                           shapes: _shapes,
                           freehandStrokes: _freehandStrokes,
+                          traces: _traces,
                           layerSettings: _layerSettings,
                           traceLayerVisible: _traceLayerVisible,
                           layersCollapsed: _layersCollapsed,
@@ -6539,6 +6561,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onShapeBorderWidthChanged: _updateShapeBorderWidth,
                           onShapePatternChanged: _updateShapePattern,
                           onSetShapeDefault: _setShapeDefault,
+                          onTraceLabelChanged: _updateTraceLabel,
+                          onEditTrace: (index) =>
+                              _openTraceWorkspace(editIndex: index),
                         ),
                       ),
                   ],
@@ -6957,6 +6982,7 @@ class _PropertiesSidebar extends StatelessWidget {
     required this.wallSegments,
     required this.shapes,
     required this.freehandStrokes,
+    required this.traces,
     required this.layerSettings,
     required this.traceLayerVisible,
     required this.layersCollapsed,
@@ -6993,6 +7019,8 @@ class _PropertiesSidebar extends StatelessWidget {
     required this.onShapeBorderWidthChanged,
     required this.onShapePatternChanged,
     required this.onSetShapeDefault,
+    required this.onTraceLabelChanged,
+    required this.onEditTrace,
   });
 
   final bool layersOnly;
@@ -7001,6 +7029,7 @@ class _PropertiesSidebar extends StatelessWidget {
   final List<WallSegment> wallSegments;
   final List<GraphShape> shapes;
   final List<FreehandStroke> freehandStrokes;
+  final List<TraceGeometry> traces;
   final Map<_GraphLayer, _LayerSettings> layerSettings;
   final bool traceLayerVisible;
   final bool layersCollapsed;
@@ -7040,6 +7069,8 @@ class _PropertiesSidebar extends StatelessWidget {
   final void Function(int index, GraphShapePattern pattern)
       onShapePatternChanged;
   final ValueChanged<int> onSetShapeDefault;
+  final void Function(int index, String label) onTraceLabelChanged;
+  final ValueChanged<int> onEditTrace;
 
   @override
   Widget build(BuildContext context) {
@@ -7157,6 +7188,59 @@ class _PropertiesSidebar extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           const _InspectorValue(label: 'Editor', value: 'Drawings mode'),
+        ],
+      );
+    }
+
+    if (currentSelection.traceIndex case final index?
+        when index < traces.length) {
+      final trace = traces[index];
+      final measurement = MeasurementService.measureTrace(
+        trace,
+        status: MeasurementAccuracyStatus.estimated,
+      );
+      final traceLocked = _isLayerLocked(_GraphLayer.trace);
+      return _InspectorSection(
+        title: 'Trace Properties',
+        children: [
+          TextFormField(
+            key: ValueKey('trace-$index'),
+            initialValue: trace.label,
+            decoration: const InputDecoration(labelText: 'Label'),
+            enabled: !traceLocked,
+            onChanged: traceLocked
+                ? null
+                : (value) => onTraceLabelChanged(index, value),
+          ),
+          const SizedBox(height: 10),
+          _InspectorValue(
+            label: 'Corners',
+            value: trace.canvasPoints.length.toString(),
+          ),
+          const SizedBox(height: 8),
+          _InspectorValue(
+            label: 'Perimeter',
+            value: MeasurementFormat.linearFeet(measurement.linearFeet),
+          ),
+          const SizedBox(height: 8),
+          _InspectorValue(
+            label: 'Area',
+            value: MeasurementFormat.squareFeet(measurement.squareFeet),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: traceLocked ? null : () => onEditTrace(index),
+            icon: const Icon(Icons.edit_location_alt_outlined),
+            label: const Text('Edit Map Points'),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            traceLocked
+                ? 'Unlock the Trace layer to edit this outline.'
+                : 'Drag the blue corner handles on the canvas, or edit the '
+                    'original points on the map.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         ],
       );
     }

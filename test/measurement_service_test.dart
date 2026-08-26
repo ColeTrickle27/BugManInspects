@@ -84,7 +84,7 @@ void main() {
     expect(result.isUsableForBusinessCalculations, isTrue);
   });
 
-  test('trace projection auto-fits uniformly and persists a usable scale', () {
+  test('trace projection uses the canvas 24 units per foot scale', () {
     const points = [
       GeoPoint(latitude: 35, longitude: -86),
       GeoPoint(latitude: 35, longitude: -85.9998),
@@ -96,7 +96,15 @@ void main() {
     );
 
     expect(projected.canvasPoints, hasLength(3));
-    expect(projected.metersPerCanvasUnit, greaterThan(0));
+    expect(projected.metersPerCanvasUnit, closeTo(0.3048 / 24, 1e-12));
+    final geographicMeters = MeasurementService.geodesicDistanceMeters(
+      points.first,
+      points[1],
+    );
+    final canvasFeet = projected.canvasPoints.first
+            .distanceTo(projected.canvasPoints[1]) /
+        24;
+    expect(canvasFeet, closeTo(geographicMeters * 3.280839895013123, 0.01));
     expect(
       TraceProjectionService.scaleBarFeet(projected.metersPerCanvasUnit),
       greaterThan(0),
