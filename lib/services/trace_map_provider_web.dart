@@ -1,35 +1,28 @@
-import 'dart:js_interop';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_dragmarker/flutter_map_dragmarker.dart';
 import 'package:latlong2/latlong.dart' as latlong;
 
 import '../models/trace_geometry.dart';
-import 'census_geocoder.dart';
 import 'trace_map_provider.dart';
 
 TraceMapProvider createTraceMapProvider() => NorthCarolinaTraceMapProvider();
 
 class NorthCarolinaTraceMapProvider implements TraceMapProvider {
-  static const String _imageryWmsUrl =
-      'https://services.nconemap.gov/secure/services/Imagery/'
-      'Orthoimagery_Latest/ImageServer/WMSServer?';
+  // NC OneMap publishes this fused tile cache alongside the dynamic WMS
+  // service. Keeping the same imagery provider preserves the field tracing
+  // workflow while avoiding per-tile WMS rendering work.
+  static const String _imageryTileUrl =
+      'https://services.nconemap.gov/secure/rest/services/Imagery/'
+      'Orthoimagery_Latest_cached/ImageServer/tile/{z}/{y}/{x}';
 
   @override
   Future<void> initialize() async {}
 
   @override
-  Future<GeoPoint?> geocode(String address) async {
-    final response = await _bugmanCensusGeocode(
-      northCarolinaGeocodeQuery(address),
-    ).toDart.timeout(const Duration(seconds: 15));
-    return parseNorthCarolinaCensusMatch(response.dartify());
-  }
-
-  @override
   Widget buildMap({
     required GeoPoint center,
+    required GeoPoint selectedAddress,
     required List<GeoPoint> points,
     required ValueChanged<GeoPoint> onMapTap,
     required void Function(int index, GeoPoint point) onVertexMoved,
@@ -65,15 +58,33 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
           ),
           children: [
             TileLayer(
-              wmsOptions: WMSTileLayerOptions(
-                baseUrl: _imageryWmsUrl,
-                layers: const ['0'],
-                format: 'image/jpeg',
-                transparent: false,
-                version: '1.3.0',
-              ),
+              urlTemplate: _imageryTileUrl,
               maxNativeZoom: 21,
               userAgentPackageName: 'com.holloman.bugman_graphs',
+            ),
+            // This is a temporary trace-workspace aid only. It represents the
+            // selected address result, not a saved graph object or an
+            // inspection marker.
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: latlong.LatLng(
+                    selectedAddress.latitude,
+                    selectedAddress.longitude,
+                  ),
+                  width: 40,
+                  height: 40,
+                  child: const Tooltip(
+                    message: 'Selected address',
+                    child: Icon(
+                      Icons.gps_fixed,
+                      key: ValueKey('trace-search-result-pin'),
+                      color: Color(0xFF1565C0),
+                      size: 34,
+                    ),
+                  ),
+                ),
+              ],
             ),
             if (mapPoints.length >= 3)
               PolygonLayer(
@@ -163,6 +174,3 @@ class _VertexPin extends StatelessWidget {
     );
   }
 }
-
-@JS('bugmanCensusGeocode')
-external JSPromise<JSObject> _bugmanCensusGeocode(String address);

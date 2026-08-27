@@ -1,7 +1,12 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../models/graph_document.dart';
 import '../models/trace_geometry.dart';
+import '../services/address_suggestion_service.dart';
+import '../services/address_suggestion_service_factory.dart';
 import '../services/measurement_format.dart';
 import '../services/measurement_service.dart';
 import '../services/trace_map_provider.dart';
@@ -14,6 +19,7 @@ class TraceWorkspaceScreen extends StatefulWidget {
     required this.canvasSize,
     required this.traceLabel,
     this.provider,
+    this.addressService,
     this.initialTrace,
     super.key,
   });
@@ -22,6 +28,7 @@ class TraceWorkspaceScreen extends StatefulWidget {
   final Size canvasSize;
   final String traceLabel;
   final TraceMapProvider? provider;
+  final AddressSuggestionService? addressService;
   final TraceGeometry? initialTrace;
 
   @override
@@ -29,57 +36,144 @@ class TraceWorkspaceScreen extends StatefulWidget {
 }
 
 class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
+  static const _minimumQueryLength = 3;
+
   late final TraceMapProvider _provider;
+  late final AddressSuggestionService _addressService;
   late final TextEditingController _addressController;
   final List<GeoPoint> _points = <GeoPoint>[];
-  GeoPoint? _center;
-  bool _loading = true;
+  final Random _random = Random.secure();
+  Timer? _searchDebounce;
+  List<AddressSuggestion> _suggestions = const <AddressSuggestion>[];
+  AddressSelection? _selectedAddress;
+  String _sessionToken = '';
   String? _error;
+  int _searchRequest = 0;
+  bool _initializingMap = true;
+  bool _searching = false;
+  bool _selecting = false;
 
   @override
   void initState() {
     super.initState();
     _provider = widget.provider ?? createTraceMapProvider();
+    _addressService = widget.addressService ?? createAddressSuggestionService();
     _addressController = TextEditingController(text: widget.address);
     _points.addAll(widget.initialTrace?.geoPoints ?? const <GeoPoint>[]);
-    _loadAddress();
+    _sessionToken = _newSessionToken();
+    _initializeWorkspace();
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _addressController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadAddress() async {
-    final address = _addressController.text.trim();
-    if (address.isEmpty) {
-      setState(() {
-        _loading = false;
-        _error = 'Enter a Location Address to open the trace map.';
-      });
-      return;
-    }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _initializeWorkspace() async {
     try {
       await _provider.initialize();
-      final center = await _provider.geocode(address);
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _center = center;
-        _error = center == null
-            ? 'That address could not be located. Edit it and search again.'
-            : null;
-      });
+      setState(() => _initializingMap = false);
+      _scheduleSuggestionSearch(immediate: true);
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
-        _error = error.toString();
+        _initializingMap = false;
+        _error = _messageFor(error);
+      });
+    }
+  }
+
+  void _onAddressChanged(String _) {
+    _selectedAddress = null;
+    _error = null;
+    _suggestions = const <AddressSuggestion>[];
+    _sessionToken = _newSessionToken();
+    _scheduleSuggestionSearch();
+  }
+
+  void _scheduleSuggestionSearch({bool immediate = false}) {
+    _searchDebounce?.cancel();
+    final request = ++_searchRequest;
+    final query = _addressController.text.trim();
+    if (query.length < _minimumQueryLength) {
+      if (mounted) {
+        setState(() {
+          _searching = false;
+          _suggestions = const <AddressSuggestion>[];
+        });
+      }
+      return;
+    }
+    setState(() => _searching = true);
+    void search() => _searchSuggestions(request, query, _sessionToken);
+    if (immediate) {
+      search();
+    } else {
+      _searchDebounce = Timer(const Duration(milliseconds: 300), search);
+    }
+  }
+
+  Future<void> _searchSuggestions(
+    int request,
+    String query,
+    String sessionToken,
+  ) async {
+    try {
+      final suggestions = await _addressService.suggest(
+        query,
+        sessionToken: sessionToken,
+      );
+      if (!mounted || request != _searchRequest) return;
+      setState(() {
+        _searching = false;
+        _suggestions = suggestions;
+        _error = suggestions.isEmpty
+            ? 'No matching address was found. Refine the address and try again.'
+            : null;
+      });
+    } catch (error) {
+      if (!mounted || request != _searchRequest) return;
+      setState(() {
+        _searching = false;
+        _suggestions = const <AddressSuggestion>[];
+        _error = _messageFor(error);
+      });
+    }
+  }
+
+  Future<void> _selectAddress(AddressSuggestion suggestion) async {
+    _searchDebounce?.cancel();
+    final request = ++_searchRequest;
+    final sessionToken = _sessionToken;
+    setState(() {
+      _selecting = true;
+      _searching = false;
+      _error = null;
+    });
+    try {
+      final selection = await _addressService.select(
+        suggestion,
+        sessionToken: sessionToken,
+      );
+      if (!mounted || request != _searchRequest) return;
+      setState(() {
+        _selecting = false;
+        _selectedAddress = selection;
+        _suggestions = const <AddressSuggestion>[];
+        _sessionToken = _newSessionToken();
+        _addressController.text = selection.standardizedAddress;
+        _error = selection.coordinate == null
+            ? 'This standardized address does not include a mappable location.'
+            : null;
+      });
+    } catch (error) {
+      if (!mounted || request != _searchRequest) return;
+      setState(() {
+        _selecting = false;
+        _error = _messageFor(error);
       });
     }
   }
@@ -137,33 +231,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
       ),
       body: Column(
         children: [
-          Material(
-            elevation: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      key: const ValueKey('trace-address-field'),
-                      controller: _addressController,
-                      onSubmitted: (_) => _loadAddress(),
-                      decoration: const InputDecoration(
-                        labelText: 'Location Address',
-                        prefixIcon: Icon(Icons.location_on_outlined),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: _loading ? null : _loadAddress,
-                    icon: const Icon(Icons.search),
-                    label: const Text('Search'),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildAddressSearch(),
           Expanded(child: _buildMapBody()),
           Material(
             elevation: 8,
@@ -202,11 +270,121 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
     );
   }
 
+  Widget _buildAddressSearch() {
+    final selection = _selectedAddress;
+    return Material(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('trace-address-field'),
+                    controller: _addressController,
+                    onChanged: _onAddressChanged,
+                    onSubmitted: (_) =>
+                        _scheduleSuggestionSearch(immediate: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Location Address',
+                      hintText: 'Start typing, then choose the address',
+                      prefixIcon: Icon(Icons.location_on_outlined),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: _initializingMap || _selecting
+                      ? null
+                      : () => _scheduleSuggestionSearch(immediate: true),
+                  icon: const Icon(Icons.search),
+                  label: const Text('Search'),
+                ),
+              ],
+            ),
+            if (_searching || _selecting)
+              const Padding(
+                padding: EdgeInsets.only(top: 10),
+                child: LinearProgressIndicator(),
+              ),
+            if (_suggestions.isNotEmpty) _buildSuggestions(),
+            if (selection != null) _buildAddressQuality(selection),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSuggestions() {
+    return Semantics(
+      label: 'Address suggestions',
+      child: Card(
+        key: const ValueKey('trace-address-suggestions'),
+        margin: const EdgeInsets.only(top: 8),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            for (final suggestion in _suggestions)
+              ListTile(
+                key: ValueKey('trace-address-suggestion-${suggestion.id}'),
+                leading: const Icon(Icons.location_on_outlined),
+                title: Text(suggestion.primaryText),
+                subtitle: suggestion.secondaryText == null
+                    ? null
+                    : Text(suggestion.secondaryText!),
+                onTap: _selecting ? null : () => _selectAddress(suggestion),
+              ),
+            const Divider(height: 1),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _GoogleAttribution(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddressQuality(AddressSelection selection) {
+    final quality = selection.quality;
+    final qualityLabel = quality.isPropertyLevel
+        ? 'Property-level location'
+        : 'Approximate location (${_displayGranularity(quality.geocodeGranularity)})';
+    return Semantics(
+      label: 'Selected address quality: $qualityLabel',
+      child: Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Row(
+          children: [
+            Icon(
+              quality.isPropertyLevel ? Icons.verified : Icons.info_outline,
+              color: quality.isPropertyLevel ? Colors.green.shade700 : null,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                quality.requiresReview
+                    ? '$qualityLabel. Review the address before tracing.'
+                    : qualityLabel,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildMapBody() {
-    if (_loading) {
+    if (_initializingMap) {
       return const Center(child: CircularProgressIndicator());
     }
-    final center = _center;
+    final center = _selectedAddress?.coordinate;
     if (_error != null || center == null) {
       return Center(
         child: ConstrainedBox(
@@ -219,14 +397,14 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
                 const Icon(Icons.map_outlined, size: 54),
                 const SizedBox(height: 12),
                 Text(
-                  _error ?? 'The map is unavailable.',
+                  _error ??
+                      'Enter at least 3 characters, then choose an address suggestion.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Trace searches North Carolina addresses and uses NC '
-                  'OneMap aerial imagery. Check the address and your internet '
-                  'connection, then try again.',
+                  'Address suggestions confirm the selected location. NC OneMap '
+                  'aerial imagery remains the tracing map.',
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -240,6 +418,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
         Positioned.fill(
           child: _provider.buildMap(
             center: center,
+            selectedAddress: center,
             points: _points,
             onMapTap: (point) => setState(() => _points.add(point)),
             onVertexMoved: (index, point) => setState(() {
@@ -249,18 +428,61 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
             }),
           ),
         ),
-        Positioned(
+        const Positioned(
           left: 12,
           top: 12,
           child: Card(
             child: Padding(
-              padding: const EdgeInsets.all(10),
+              padding: EdgeInsets.all(10),
               child: Text(
-                _points.isEmpty
-                    ? 'Tap each property corner.'
-                    : 'Tap to add points. Drag a numbered pin to adjust it.',
+                'Blue crosshair: selected address. Tap property corners; drag numbered pins to adjust.',
               ),
             ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _newSessionToken() {
+    const characters =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    return List<String>.generate(
+      30,
+      (_) => characters[_random.nextInt(characters.length)],
+      growable: false,
+    ).join();
+  }
+
+  String _messageFor(Object error) => error.toString().replaceFirst(
+        RegExp(r'^Exception:\\s*'),
+        '',
+      );
+
+  String _displayGranularity(String granularity) =>
+      granularity.toLowerCase().replaceAll('_', ' ').replaceFirstMapped(
+            RegExp(r'^.'),
+            (match) => match.group(0)!.toUpperCase(),
+          );
+}
+
+class _GoogleAttribution extends StatelessWidget {
+  const _GoogleAttribution();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text('Powered by', style: TextStyle(fontSize: 11)),
+        const SizedBox(width: 4),
+        Image.network(
+          'https://maps.gstatic.com/mapfiles/api-3/images/powered-by-google-on-white3.png',
+          width: 120,
+          height: 14,
+          errorBuilder: (context, error, stackTrace) => const Text(
+            'Google',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
           ),
         ),
       ],
