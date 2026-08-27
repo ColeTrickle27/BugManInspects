@@ -26,10 +26,9 @@ class HttpAddressSuggestionService implements AddressSuggestionService {
     String query, {
     required String sessionToken,
   }) async {
-    final response = await _client.post(
-      Uri.parse('$_apiOrigin/api/bugman-graphs/address-suggestions'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'query': query, 'sessionToken': sessionToken}),
+    final response = await _post(
+      '/api/bugman-graphs/address-suggestions',
+      {'query': query, 'sessionToken': sessionToken},
     );
     final payload = _decodeResponse(response);
     final suggestions = payload['suggestions'];
@@ -46,13 +45,12 @@ class HttpAddressSuggestionService implements AddressSuggestionService {
     AddressSuggestion suggestion, {
     required String sessionToken,
   }) async {
-    final response = await _client.post(
-      Uri.parse('$_apiOrigin/api/bugman-graphs/address-selection'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
+    final response = await _post(
+      '/api/bugman-graphs/address-selection',
+      {
         'address': suggestion.address,
         'sessionToken': sessionToken,
-      }),
+      },
     );
     final payload = _decodeResponse(response);
     final standardizedAddress =
@@ -106,6 +104,21 @@ class HttpAddressSuggestionService implements AddressSuggestionService {
       secondaryText:
           secondaryText == null || secondaryText.isEmpty ? null : secondaryText,
     );
+  }
+
+  Future<http.Response> _post(String path, Map<String, String> body) async {
+    try {
+      return await _client.post(
+        Uri.parse('$_apiOrigin$path'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
+    } on http.ClientException {
+      throw const AddressSuggestionServiceException(
+        'Address suggestions could not be reached. Check that you are signed '
+        'in to OpsBrain, then try again.',
+      );
+    }
   }
 
   Map<String, dynamic> _decodeResponse(http.Response response) {
