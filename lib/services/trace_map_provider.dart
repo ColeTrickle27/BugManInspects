@@ -13,10 +13,9 @@ class TraceMapConfigurationException implements Exception {
 abstract class TraceMapProvider {
   Future<void> initialize();
 
-  Future<GeoPoint?> geocode(String address);
-
   Widget buildMap({
     required GeoPoint center,
+    required GeoPoint selectedAddress,
     required List<GeoPoint> points,
     required ValueChanged<GeoPoint> onMapTap,
     required void Function(int index, GeoPoint point) onVertexMoved,

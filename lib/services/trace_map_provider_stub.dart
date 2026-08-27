@@ -14,11 +14,9 @@ class UnsupportedTraceMapProvider implements TraceMapProvider {
   }
 
   @override
-  Future<GeoPoint?> geocode(String address) async => null;
-
-  @override
   Widget buildMap({
     required GeoPoint center,
+    required GeoPoint selectedAddress,
     required List<GeoPoint> points,
     required ValueChanged<GeoPoint> onMapTap,
     required void Function(int index, GeoPoint point) onVertexMoved,
