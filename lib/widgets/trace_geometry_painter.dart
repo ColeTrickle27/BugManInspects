@@ -60,8 +60,94 @@ class TraceGeometryPainter extends CustomPainter {
                 selected ? const Color(0xFF1976D2) : const Color(0xFFCC2000),
         );
       }
+      _drawSegmentMeasurements(canvas, trace);
       _drawSummary(canvas, trace);
       _drawScaleBar(canvas, trace);
+      if (selected) _drawRotationHandle(canvas, trace);
+    }
+  }
+
+  static Rect? canvasBounds(TraceGeometry trace) {
+    if (trace.canvasPoints.isEmpty) return null;
+    final left = trace.canvasPoints.map((point) => point.x).reduce(math.min);
+    final right = trace.canvasPoints.map((point) => point.x).reduce(math.max);
+    final top = trace.canvasPoints.map((point) => point.y).reduce(math.min);
+    final bottom = trace.canvasPoints.map((point) => point.y).reduce(math.max);
+    return Rect.fromLTRB(left, top, right, bottom);
+  }
+
+  static Offset? rotationHandleCenter(TraceGeometry trace) {
+    final bounds = canvasBounds(trace);
+    return bounds == null ? null : bounds.topCenter - const Offset(0, 42);
+  }
+
+  void _drawSegmentMeasurements(Canvas canvas, TraceGeometry trace) {
+    final pointCount = trace.canvasPoints.length < trace.geoPoints.length
+        ? trace.canvasPoints.length
+        : trace.geoPoints.length;
+    if (pointCount < 2) return;
+    final edgeCount =
+        trace.closed && pointCount > 2 ? pointCount : pointCount - 1;
+    final center = Offset(
+      trace.canvasPoints
+              .take(pointCount)
+              .map((point) => point.x)
+              .reduce((a, b) => a + b) /
+          pointCount,
+      trace.canvasPoints
+              .take(pointCount)
+              .map((point) => point.y)
+              .reduce((a, b) => a + b) /
+          pointCount,
+    );
+
+    for (var index = 0; index < edgeCount; index += 1) {
+      final nextIndex = (index + 1) % pointCount;
+      final start = trace.canvasPoints[index].offset;
+      final end = trace.canvasPoints[nextIndex].offset;
+      final segment = end - start;
+      final segmentLength = segment.distance;
+      if (segmentLength <= 0.01) continue;
+
+      final midpoint = Offset(
+        (start.dx + end.dx) / 2,
+        (start.dy + end.dy) / 2,
+      );
+      var normal =
+          Offset(-segment.dy / segmentLength, segment.dx / segmentLength);
+      final towardMidpoint = midpoint - center;
+      if ((normal.dx * towardMidpoint.dx) + (normal.dy * towardMidpoint.dy) <
+          0) {
+        normal = Offset(-normal.dx, -normal.dy);
+      }
+
+      final linearFeet = MeasurementService.geodesicDistanceMeters(
+            trace.geoPoints[index],
+            trace.geoPoints[nextIndex],
+          ) *
+          3.280839895013123;
+      final label = TextPainter(
+        text: TextSpan(
+          text: MeasurementFormat.linearFeet(linearFeet),
+          style: const TextStyle(
+            color: Color(0xFF0F3D77),
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final labelCenter = midpoint + (normal * 22);
+      final labelRect = Rect.fromCenter(
+        center: labelCenter,
+        width: label.width + 16,
+        height: label.height + 10,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(labelRect, const Radius.circular(6)),
+        Paint()..color = Colors.white.withValues(alpha: 0.92),
+      );
+      label.paint(canvas, labelRect.topLeft + const Offset(8, 5));
     }
   }
 
@@ -133,6 +219,30 @@ class TraceGeometryPainter extends CustomPainter {
     label.paint(
       canvas,
       Offset((start.dx + end.dx - label.width) / 2, start.dy - 26),
+    );
+  }
+
+  void _drawRotationHandle(Canvas canvas, TraceGeometry trace) {
+    final bounds = canvasBounds(trace);
+    final handleCenter = rotationHandleCenter(trace);
+    if (bounds == null || handleCenter == null) return;
+    final paint = Paint()
+      ..color = const Color(0xFF1976D2)
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(bounds.topCenter, handleCenter, paint);
+    canvas.drawCircle(
+      handleCenter,
+      13,
+      Paint()..color = Colors.white,
+    );
+    canvas.drawCircle(handleCenter, 13, paint);
+    canvas.drawArc(
+      Rect.fromCircle(center: handleCenter, radius: 7),
+      -math.pi / 3,
+      math.pi * 1.45,
+      false,
+      paint,
     );
   }
 

@@ -48,7 +48,9 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
                   )
                 : null,
             minZoom: 4,
-            maxZoom: 21,
+            // The NC OneMap cache's usable finest scale is level 20. Allowing
+            // level 21 requests blank tiles, which leaves the trace map white.
+            maxZoom: 20,
             onTap: (_, position) => onMapTap(
               GeoPoint(
                 latitude: position.latitude,
@@ -59,7 +61,7 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
           children: [
             TileLayer(
               urlTemplate: _imageryTileUrl,
-              maxNativeZoom: 21,
+              maxNativeZoom: 20,
               userAgentPackageName: 'com.holloman.bugman_graphs',
             ),
             // This is a temporary trace-workspace aid only. It represents the
@@ -112,9 +114,16 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
                 for (var index = 0; index < mapPoints.length; index += 1)
                   DragMarker(
                     point: mapPoints[index],
-                    size: const Size(44, 44),
-                    builder: (context, position, isDragging) =>
-                        _VertexPin(number: index + 1),
+                    // Keep a comfortable drag target while making the visible
+                    // pin small enough to place close property corners.
+                    size: const Size(36, 36),
+                    builder: (context, position, isDragging) => Center(
+                      child: SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: _VertexPin(number: index + 1),
+                      ),
+                    ),
                     onDragEnd: (_, position) => onVertexMoved(
                       index,
                       GeoPoint(
@@ -168,6 +177,7 @@ class _VertexPin extends StatelessWidget {
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
+            fontSize: 12,
           ),
         ),
       ),

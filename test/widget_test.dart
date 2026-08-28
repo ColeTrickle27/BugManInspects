@@ -1023,9 +1023,9 @@ void main() {
             GeoPoint(latitude: 34.999, longitude: -77.999),
           ],
           canvasPoints: [
-            GraphPoint(x: 1700, y: 1200),
-            GraphPoint(x: 1900, y: 1200),
-            GraphPoint(x: 1900, y: 1400),
+            GraphPoint(x: 1700, y: 1800),
+            GraphPoint(x: 1900, y: 1800),
+            GraphPoint(x: 1900, y: 2000),
           ],
           metersPerCanvasUnit: 0.5,
         ),
@@ -1040,7 +1040,10 @@ void main() {
     final controller = tester
         .widget<InteractiveViewer>(viewerFinder)
         .transformationController!;
-    const scenePoint = Offset(1700, 1200);
+    controller.value = Matrix4.identity()
+      ..translateByDouble(-1400, -1400, 0, 1);
+    await tester.pump();
+    const scenePoint = Offset(1700, 1800);
     final localPoint = MatrixUtils.transformPoint(
       controller.value,
       scenePoint,
@@ -1050,8 +1053,73 @@ void main() {
     await tester.pump();
 
     expect(document.traces.single.canvasPoints.first.x, greaterThan(1700));
-    expect(document.traces.single.canvasPoints.first.y, greaterThan(1200));
+    expect(document.traces.single.canvasPoints.first.y, greaterThan(1800));
     expect(document.traces.single.geoPoints.first.longitude, isNot(-78.0));
+
+    final beforeTraceMove = document.traces.single;
+    const traceInterior = Offset(1850, 1900);
+    final traceInteriorLocal = MatrixUtils.transformPoint(
+      controller.value,
+      traceInterior,
+    );
+    await tester.dragFrom(
+      tester.getTopLeft(viewerFinder) + traceInteriorLocal,
+      const Offset(36, 24),
+    );
+    await tester.pump();
+
+    final movedTrace = document.traces.single;
+    expect(
+      movedTrace.canvasPoints[1].x,
+      greaterThan(beforeTraceMove.canvasPoints[1].x),
+    );
+    expect(
+      movedTrace.geoPoints[1].longitude,
+      greaterThan(beforeTraceMove.geoPoints[1].longitude),
+    );
+
+    var left = movedTrace.canvasPoints.first.x;
+    var right = left;
+    var top = movedTrace.canvasPoints.first.y;
+    for (final point in movedTrace.canvasPoints.skip(1)) {
+      left = point.x < left ? point.x : left;
+      right = point.x > right ? point.x : right;
+      top = point.y < top ? point.y : top;
+    }
+    final selectionLocal = MatrixUtils.transformPoint(
+      controller.value,
+      movedTrace.canvasPoints[1].offset,
+    );
+    await tester.tapAt(tester.getTopLeft(viewerFinder) + selectionLocal);
+    await tester.pump();
+    final rotationHandleScene = Offset((left + right) / 2, top - 42);
+    final rotationHandleLocal = MatrixUtils.transformPoint(
+      controller.value,
+      rotationHandleScene,
+    );
+    await tester.dragFrom(
+      tester.getTopLeft(viewerFinder) + rotationHandleLocal,
+      const Offset(72, 36),
+    );
+    await tester.pump();
+
+    final rotatedTrace = document.traces.single;
+    expect(
+      rotatedTrace.canvasPoints.asMap().entries.any(
+            (entry) =>
+                entry.value.x != movedTrace.canvasPoints[entry.key].x ||
+                entry.value.y != movedTrace.canvasPoints[entry.key].y,
+          ),
+      isTrue,
+    );
+    expect(
+      rotatedTrace.geoPoints.first.latitude,
+      movedTrace.geoPoints.first.latitude,
+    );
+    expect(
+      rotatedTrace.geoPoints.first.longitude,
+      movedTrace.geoPoints.first.longitude,
+    );
 
     await tester.tap(find.byTooltip('Delete selection'));
     await tester.pump();

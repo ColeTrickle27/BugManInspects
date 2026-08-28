@@ -676,6 +676,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           : _dragTargetForSelection(currentSelection, pointerPoint);
       if (selectedTarget?.kind == _DragKind.wallEndpoint ||
           selectedTarget?.kind == _DragKind.traceVertex ||
+          selectedTarget?.kind == _DragKind.traceRotation ||
           selectedTarget?.kind == _DragKind.shapeResize ||
           selectedTarget?.kind == _DragKind.shapeRotation) {
         _pointerDownHitSelection = currentSelection;
@@ -2273,6 +2274,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
             _objectHitDistance) {
           return i;
         }
+        final path = Path()
+          ..moveTo(trace.canvasPoints.first.x, trace.canvasPoints.first.y);
+        for (final vertex in trace.canvasPoints.skip(1)) {
+          path.lineTo(vertex.x, vertex.y);
+        }
+        path.close();
+        if (path.contains(point.offset)) return i;
       }
     }
     return null;
@@ -2509,10 +2517,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
             distance: _distanceToSegment(point, _wallSegments[selection.index]),
             originalPoint: point,
           ),
-      _SelectionKind.trace => _nearestTraceVertexTarget(
-          selection.index,
-          point,
-        ),
+      _SelectionKind.trace =>
+        _nearestTraceVertexTarget(selection.index, point) ??
+            _nearestTraceRotationTarget(selection.index, point) ??
+            _DragTarget.traceMove(
+              traceIndex: selection.index,
+              originalPoint: point,
+            ),
     };
   }
 
@@ -2534,6 +2545,26 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       traceVertexIndex: nearestVertexIndex,
       originalPoint: trace.canvasPoints[nearestVertexIndex],
       distance: nearestDistance,
+    );
+  }
+
+  _DragTarget? _nearestTraceRotationTarget(int traceIndex, GraphPoint point) {
+    if (traceIndex < 0 || traceIndex >= _traces.length) return null;
+    final trace = _traces[traceIndex];
+    final handleCenter = TraceGeometryPainter.rotationHandleCenter(trace);
+    final bounds = TraceGeometryPainter.canvasBounds(trace);
+    if (handleCenter == null || bounds == null) return null;
+    final distance = (point.offset - handleCenter).distance;
+    if (distance > _handleHitDistance) return null;
+    return _DragTarget.traceRotation(
+      traceIndex: traceIndex,
+      distance: distance,
+      originalPoint: point,
+      traceCenter: GraphPoint.fromOffset(bounds.center),
+      initialAngleRadians: math.atan2(
+        point.y - bounds.center.dy,
+        point.x - bounds.center.dx,
+      ),
     );
   }
 
@@ -2785,6 +2816,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       case _DragKind.traceVertex:
         _moveTraceVertex(target, point);
         return;
+      case _DragKind.traceMove:
+        _moveTrace(target, point);
+        return;
+      case _DragKind.traceRotation:
+        _rotateTrace(target, point);
+        return;
     }
   }
 
@@ -2822,6 +2859,77 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     nextTraces[traceIndex] = sourceTrace.copyWith(
       canvasPoints: nextCanvasPoints,
       geoPoints: nextGeoPoints,
+    );
+    setState(() {
+      _document.replaceTraces(nextTraces);
+      _dragMoved = true;
+    });
+  }
+
+  void _moveTrace(_DragTarget target, GraphPoint point) {
+    final traceIndex = target.traceIndex;
+    final originalPoint = target.originalPoint;
+    final sourceTraces = _dragOriginalTraces ?? _traces;
+    if (traceIndex == null ||
+        originalPoint == null ||
+        traceIndex < 0 ||
+        traceIndex >= sourceTraces.length) {
+      return;
+    }
+    final sourceTrace = sourceTraces[traceIndex];
+    final delta = point.offset - originalPoint.offset;
+    final metersPerCanvasUnit = sourceTrace.metersPerCanvasUnit;
+    final nextGeoPoints =
+        metersPerCanvasUnit == null || metersPerCanvasUnit <= 0
+            ? sourceTrace.geoPoints
+            : [
+                for (final geoPoint in sourceTrace.geoPoints)
+                  TraceProjectionService.moveGeoPointByCanvasDelta(
+                    point: geoPoint,
+                    canvasDelta: delta,
+                    metersPerCanvasUnit: metersPerCanvasUnit,
+                  ),
+              ];
+    final nextTraces = <TraceGeometry>[..._traces];
+    nextTraces[traceIndex] = sourceTrace.copyWith(
+      canvasPoints: [
+        for (final canvasPoint in sourceTrace.canvasPoints)
+          GraphPoint.fromOffset(canvasPoint.offset + delta),
+      ],
+      geoPoints: nextGeoPoints,
+    );
+    setState(() {
+      _document.replaceTraces(nextTraces);
+      _dragMoved = true;
+    });
+  }
+
+  void _rotateTrace(_DragTarget target, GraphPoint point) {
+    final traceIndex = target.traceIndex;
+    final traceCenter = target.traceCenter;
+    final sourceTraces = _dragOriginalTraces ?? _traces;
+    if (traceIndex == null ||
+        traceCenter == null ||
+        traceIndex < 0 ||
+        traceIndex >= sourceTraces.length) {
+      return;
+    }
+    final currentAngle = math.atan2(
+      point.y - traceCenter.y,
+      point.x - traceCenter.x,
+    );
+    final deltaRadians = currentAngle - target.initialAngleRadians;
+    final sourceTrace = sourceTraces[traceIndex];
+    final nextTraces = <TraceGeometry>[..._traces];
+    // Rotation is a canvas presentation edit. Geographic vertices remain the
+    // source of truth for the property's map-derived measurements.
+    nextTraces[traceIndex] = sourceTrace.copyWith(
+      canvasPoints: [
+        for (final canvasPoint in sourceTrace.canvasPoints)
+          GraphPoint.fromOffset(
+            _rotateOffset(canvasPoint.offset, traceCenter.offset, deltaRadians),
+          ),
+      ],
     );
     setState(() {
       _document.replaceTraces(nextTraces);
@@ -4563,7 +4671,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     final right = trace.canvasPoints.map((point) => point.x).reduce(math.max);
     final top = trace.canvasPoints.map((point) => point.y).reduce(math.min);
     final bottom = trace.canvasPoints.map((point) => point.y).reduce(math.max);
-    final bounds = Rect.fromLTRB(left, top, right, bottom);
+    // Keep the edge footage labels and selected trace rotation handle inside
+    // the viewport when a new or existing trace is fitted to the canvas.
+    final bounds = Rect.fromLTRB(left, top, right, bottom).inflate(64);
     const padding = 96.0;
     final scale = math
         .min(
@@ -8885,6 +8995,8 @@ enum _DragKind {
   shapeRotation,
   freehand,
   traceVertex,
+  traceMove,
+  traceRotation,
 }
 
 class _DragTarget {
@@ -8897,6 +9009,7 @@ class _DragTarget {
     this.freehandIndex,
     this.traceIndex,
     this.traceVertexIndex,
+    this.traceCenter,
     this.endpointRefs = const <_SegmentEndpointRef>[],
     this.movesActiveWallStart = false,
     this.movesActivePathStart = false,
@@ -9037,6 +9150,37 @@ class _DragTarget {
     );
   }
 
+  factory _DragTarget.traceMove({
+    required int traceIndex,
+    required GraphPoint originalPoint,
+  }) {
+    return _DragTarget._(
+      kind: _DragKind.traceMove,
+      traceIndex: traceIndex,
+      distance: 0,
+      originalPoint: originalPoint,
+      selection: _Selection.trace(traceIndex),
+    );
+  }
+
+  factory _DragTarget.traceRotation({
+    required int traceIndex,
+    required double distance,
+    required GraphPoint originalPoint,
+    required GraphPoint traceCenter,
+    required double initialAngleRadians,
+  }) {
+    return _DragTarget._(
+      kind: _DragKind.traceRotation,
+      traceIndex: traceIndex,
+      distance: distance,
+      originalPoint: originalPoint,
+      traceCenter: traceCenter,
+      initialAngleRadians: initialAngleRadians,
+      selection: _Selection.trace(traceIndex),
+    );
+  }
+
   final _DragKind kind;
   final double distance;
   final int? annotationIndex;
@@ -9045,6 +9189,7 @@ class _DragTarget {
   final int? freehandIndex;
   final int? traceIndex;
   final int? traceVertexIndex;
+  final GraphPoint? traceCenter;
   final List<_SegmentEndpointRef> endpointRefs;
   final bool movesActiveWallStart;
   final bool movesActivePathStart;
