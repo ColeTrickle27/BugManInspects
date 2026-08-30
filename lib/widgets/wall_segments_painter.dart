@@ -20,9 +20,12 @@ Offset wallMeasurementLabelCenter(
     return midpoint;
   }
   final perpendicular = Offset(-dy / length, dx / length);
-  var labelCenter = midpoint + (perpendicular * 18);
+  // Keep the label clear of the line. The larger measurement tag is easier
+  // to read when it consistently sits outside the structure rather than on
+  // top of the drawing stroke.
+  var labelCenter = midpoint + (perpendicular * 28);
   if (referencePoint != null) {
-    final oppositeCenter = midpoint - (perpendicular * 18);
+    final oppositeCenter = midpoint - (perpendicular * 28);
     if ((oppositeCenter - referencePoint).distanceSquared >
         (labelCenter - referencePoint).distanceSquared) {
       labelCenter = oppositeCenter;
@@ -354,7 +357,7 @@ class WallSegmentsPainter extends CustomPainter {
       return;
     }
 
-    final labelCenter = wallMeasurementLabelCenter(
+    var labelCenter = wallMeasurementLabelCenter(
       segment,
       referencePoint: measurementReferencePoint,
     );
@@ -362,13 +365,63 @@ class WallSegmentsPainter extends CustomPainter {
       text: TextSpan(
         text: segment.measurementLabel,
         style: const TextStyle(
-          color: Colors.black,
-          fontSize: 15,
+          color: Color(0xFF173C2B),
+          fontSize: 17,
           fontWeight: FontWeight.w800,
+          height: 1,
         ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
+    final labelRect = Rect.fromCenter(
+      center: labelCenter,
+      width: textPainter.width + 20,
+      height: textPainter.height + 12,
+    );
+    final midpoint = Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
+    final outward = labelCenter - midpoint;
+    final normal = outward / outward.distance;
+    final labelHalfExtent = (labelRect.width / 2) * normal.dx.abs() +
+        (labelRect.height / 2) * normal.dy.abs();
+    final minimumDistance = labelHalfExtent + 12;
+    if (outward.distance < minimumDistance) {
+      labelCenter = midpoint + (normal * minimumDistance);
+    }
+    final adjustedLabelRect = Rect.fromCenter(
+      center: labelCenter,
+      width: labelRect.width,
+      height: labelRect.height,
+    );
+    final labelRRect = RRect.fromRectAndRadius(
+      adjustedLabelRect,
+      Radius.circular(adjustedLabelRect.height / 2),
+    );
+    final labelPath = Path()..addRRect(labelRRect);
+    canvas.drawLine(
+      midpoint + (normal * 6),
+      labelCenter - (normal * labelHalfExtent),
+      Paint()
+        ..color = const Color(0xFF3E6752).withValues(alpha: 0.72)
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawShadow(
+      labelPath,
+      Colors.black.withValues(alpha: 0.22),
+      2,
+      false,
+    );
+    canvas.drawRRect(
+      labelRRect,
+      Paint()..color = Colors.white.withValues(alpha: 0.97),
+    );
+    canvas.drawRRect(
+      labelRRect,
+      Paint()
+        ..color = const Color(0xFF3E6752)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
     textPainter.paint(
       canvas,
       Offset(

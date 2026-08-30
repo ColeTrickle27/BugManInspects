@@ -101,6 +101,7 @@ class TraceGeometryPainter extends CustomPainter {
           pointCount,
     );
 
+    final placedLabelRects = <Rect>[];
     for (var index = 0; index < edgeCount; index += 1) {
       final nextIndex = (index + 1) % pointCount;
       final start = trace.canvasPoints[index].offset;
@@ -131,23 +132,74 @@ class TraceGeometryPainter extends CustomPainter {
           text: MeasurementFormat.linearFeet(linearFeet),
           style: const TextStyle(
             color: Color(0xFF0F3D77),
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            height: 1,
           ),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      final labelCenter = midpoint + (normal * 22);
-      final labelRect = Rect.fromCenter(
+      const horizontalPadding = 10.0;
+      const verticalPadding = 6.0;
+      final labelWidth = label.width + (horizontalPadding * 2);
+      final labelHeight = label.height + (verticalPadding * 2);
+      final labelHalfExtent = (labelWidth / 2) * normal.dx.abs() +
+          (labelHeight / 2) * normal.dy.abs();
+      var labelCenter = midpoint + (normal * (labelHalfExtent + 12));
+      var labelRect = Rect.fromCenter(
         center: labelCenter,
-        width: label.width + 16,
-        height: label.height + 10,
+        width: labelWidth,
+        height: labelHeight,
+      );
+      // Compact or irregular traces can place neighboring labels near the
+      // same corner. Keep each tag moving outward from its edge until it
+      // reads as a distinct, orderly callout.
+      while (placedLabelRects.any(
+            (placed) => placed.inflate(4).overlaps(labelRect),
+          ) &&
+          (labelCenter - midpoint).distance < 92) {
+        labelCenter += normal * 14;
+        labelRect = Rect.fromCenter(
+          center: labelCenter,
+          width: labelWidth,
+          height: labelHeight,
+        );
+      }
+      placedLabelRects.add(labelRect);
+      final labelRRect = RRect.fromRectAndRadius(
+        labelRect,
+        Radius.circular(labelRect.height / 2),
+      );
+      final labelPath = Path()..addRRect(labelRRect);
+      canvas.drawLine(
+        midpoint + (normal * 6),
+        labelCenter - (normal * labelHalfExtent),
+        Paint()
+          ..color = const Color(0xFF2B6CB0).withValues(alpha: 0.72)
+          ..strokeWidth = 2
+          ..strokeCap = StrokeCap.round,
+      );
+      canvas.drawShadow(
+        labelPath,
+        Colors.black.withValues(alpha: 0.22),
+        2,
+        false,
       );
       canvas.drawRRect(
-        RRect.fromRectAndRadius(labelRect, const Radius.circular(6)),
-        Paint()..color = Colors.white.withValues(alpha: 0.92),
+        labelRRect,
+        Paint()..color = Colors.white.withValues(alpha: 0.97),
       );
-      label.paint(canvas, labelRect.topLeft + const Offset(8, 5));
+      canvas.drawRRect(
+        labelRRect,
+        Paint()
+          ..color = const Color(0xFF2B6CB0)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
+      label.paint(
+        canvas,
+        labelRect.topLeft + const Offset(horizontalPadding, verticalPadding),
+      );
     }
   }
 
@@ -169,9 +221,10 @@ class TraceGeometryPainter extends CustomPainter {
             '${MeasurementFormat.squareFeet(measurement.squareFeet)} • '
             '${MeasurementFormat.acres(measurement.acres)}',
         style: const TextStyle(
-          color: Color(0xFF111111),
-          fontSize: 16,
-          fontWeight: FontWeight.w700,
+          color: Color(0xFF0E3056),
+          fontSize: 17,
+          fontWeight: FontWeight.w800,
+          height: 1.2,
         ),
       ),
       textAlign: TextAlign.center,
@@ -179,14 +232,32 @@ class TraceGeometryPainter extends CustomPainter {
     )..layout(maxWidth: 320);
     final rect = Rect.fromCenter(
       center: center,
-      width: text.width + 24,
-      height: text.height + 16,
+      width: text.width + 28,
+      height: text.height + 18,
+    );
+    final summaryRRect = RRect.fromRectAndRadius(
+      rect,
+      const Radius.circular(10),
+    );
+    final summaryPath = Path()..addRRect(summaryRRect);
+    canvas.drawShadow(
+      summaryPath,
+      Colors.black.withValues(alpha: 0.18),
+      2,
+      false,
     );
     canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, const Radius.circular(8)),
-      Paint()..color = Colors.white.withValues(alpha: 0.9),
+      summaryRRect,
+      Paint()..color = Colors.white.withValues(alpha: 0.96),
     );
-    text.paint(canvas, rect.topLeft + const Offset(12, 8));
+    canvas.drawRRect(
+      summaryRRect,
+      Paint()
+        ..color = const Color(0xFF2B6CB0)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+    text.paint(canvas, rect.topLeft + const Offset(14, 9));
   }
 
   void _drawScaleBar(Canvas canvas, TraceGeometry trace) {
@@ -209,17 +280,34 @@ class TraceGeometryPainter extends CustomPainter {
       text: TextSpan(
         text: '${feet.round()} ft',
         style: const TextStyle(
-          color: Color(0xFF111111),
-          fontSize: 14,
-          fontWeight: FontWeight.w700,
+          color: Color(0xFF0E3056),
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
         ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    label.paint(
-      canvas,
-      Offset((start.dx + end.dx - label.width) / 2, start.dy - 26),
+    final labelRect = Rect.fromCenter(
+      center: Offset((start.dx + end.dx) / 2, start.dy - 21),
+      width: label.width + 14,
+      height: label.height + 8,
     );
+    final labelRRect = RRect.fromRectAndRadius(
+      labelRect,
+      Radius.circular(labelRect.height / 2),
+    );
+    canvas.drawRRect(
+      labelRRect,
+      Paint()..color = Colors.white.withValues(alpha: 0.96),
+    );
+    canvas.drawRRect(
+      labelRRect,
+      Paint()
+        ..color = const Color(0xFF2B6CB0)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.25,
+    );
+    label.paint(canvas, labelRect.topLeft + const Offset(7, 4));
   }
 
   void _drawRotationHandle(Canvas canvas, TraceGeometry trace) {

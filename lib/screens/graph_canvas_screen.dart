@@ -39,7 +39,6 @@ import '../services/sales_brain_navigation.dart';
 import '../services/trace_projection_service.dart';
 import '../widgets/canvas_toolbar.dart';
 import '../widgets/freehand_strokes_painter.dart';
-import '../widgets/graph_export_downloader.dart';
 import '../widgets/graph_annotations_painter.dart';
 import '../widgets/graph_grid_painter.dart';
 import '../widgets/graph_shapes_painter.dart';
@@ -4820,7 +4819,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   bool _isGraphNotFoundError(Object error) =>
       error.toString().contains('Saved graph not found.');
 
-  Future<void> _saveDocument() async {
+  Future<bool> _saveDocument() async {
     try {
       final referencedAttachmentIds =
           _annotations.expand((annotation) => annotation.attachmentIds).toSet();
@@ -4875,7 +4874,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           }
         }
       }
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         if (portalResult != null) _portalKey = portalResult.key;
         _document.markClean();
@@ -4897,16 +4896,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
           severity: _CanvasMessageSeverity.success,
         );
       }
+      return true;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return false;
       _showCanvasMessage(
         'Graph could not be saved: $error',
         severity: _CanvasMessageSeverity.error,
       );
+      return false;
     }
   }
 
-  // "Save & Create Sales Brain Report" (item 14 of the production pass):
+  // "Save & Open Inspection Workflow" (item 14 of the production pass):
   // saves the current graph to Holloman Ops Brain (reusing the same dirty
   // guard / overwrite-or-save-as-new / 404-recovery logic as a normal
   // Save), then navigates the top-level browser to Sales Brain with the
@@ -4915,7 +4916,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   Future<void> _saveAndCreateSalesBrainReport() async {
     if (!_portalService.isAvailable) {
       _showCanvasMessage(
-        'Creating a Sales Brain report is available when BugMan Graphs '
+        'Opening the inspection workflow is available when BugMan Graphs '
         'is opened through Holloman Ops Brain',
         severity: _CanvasMessageSeverity.warning,
       );
@@ -4926,7 +4927,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         customer.pestPacLocationNumber.trim().isEmpty) {
       _showCanvasMessage(
         'This graph needs a customer with a Bill-To and Location before '
-        'creating a Sales Brain report',
+        'opening the inspection workflow',
         severity: _CanvasMessageSeverity.warning,
       );
       return;
@@ -4934,16 +4935,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     if (_portalKey == null) {
       // Never saved to Ops Brain before -- always save regardless of the
       // dirty flag, since "no changes yet" still means "not saved yet".
-      await _saveDocument();
-      if (_portalKey == null) return; // save failed
+      if (!await _saveDocument()) return;
     } else if (_document.isDirty) {
       final choice = await _confirmOverwriteOrSaveAsNew();
       if (choice == null || choice == _SaveConflictChoice.cancel) return;
       if (choice == _SaveConflictChoice.saveAsNew) {
         _replaceDocumentWithNewIdentity();
       }
-      await _saveDocument();
-      if (_portalKey == null) return; // save failed
+      if (!await _saveDocument()) return;
     }
     final url = _portalService.buildSalesBrainReportUrl(
       billToNumber: customer.pestPacBillToNumber,
@@ -4952,7 +4951,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     );
     if (url == null) {
       _showCanvasMessage(
-        'Sales Brain is not reachable from this session',
+        'The inspection workflow is not reachable from this session',
         severity: _CanvasMessageSeverity.error,
       );
       return;
@@ -4960,12 +4959,24 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     navigateToSalesBrainReport(url);
   }
 
-  // "Save to Ops Brain" > PDF File / PNG File (item 8 of the production
-  // pass): renders the same export bytes as a local Export File download,
-  // but uploads the result into the customer's BugMan Graphs folder in
-  // Holloman Ops Brain instead of downloading it to this device. Never
-  // touches the local device repository or the .bgraph portal key -- this
-  // is a read-only rendered artifact, independent of the editable graph.
+  // Each export first saves the editable graph, then saves the rendered PDF
+  // or PNG in the same customer BugMan Graphs folder. If the graph save
+  // fails, stop before creating an export without its matching graph file.
+  Future<void> _exportGraphToOpsBrain(GraphFileKind kind) async {
+    if (!_portalService.isAvailable) {
+      _showCanvasMessage(
+        'Exporting PDF/PNG files to Holloman Ops Brain is available when '
+        'BugMan Graphs is opened through Holloman Ops Brain',
+        severity: _CanvasMessageSeverity.warning,
+      );
+      return;
+    }
+    if (!await _saveDocument()) return;
+    await _saveExportToOpsBrain(kind);
+  }
+
+  // The second export step uploads the rendered file after its editable
+  // graph has been safely saved by _exportGraphToOpsBrain().
   Future<void> _saveExportToOpsBrain(GraphFileKind kind) async {
     if (!_portalService.isAvailable) {
       _showCanvasMessage(
@@ -5007,7 +5018,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     }
   }
 
-  // "+ New w/ Existing Structure" (item 7 of the production pass): starts
+  // "Copy Structure to New Graph" (item 7 of the production pass): starts
   // a brand new, separately-saved graph that reuses only this graph's
   // structural wall/shape geometry. Nothing about the currently open
   // document -- in memory or already saved to Ops Brain -- is modified.
@@ -5471,51 +5482,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     );
   }
 
-  // "Export File" > Export PDF / Export PNG (item 8 of the production
-  // pass): local-download-only, never touches Holloman Ops Brain. Each
-  // menu item downloads its format directly (the old combined picker
-  // bottom sheet was replaced by these two explicit menu entries).
-  // Downloads to this device using the standard filename convention
-  // (item 9).
-  Future<void> _exportGraphPdf() => _exportGraphFormat(_GraphExportFormat.pdf);
+  Future<void> _exportGraphPdf() =>
+      _exportGraphToOpsBrain(GraphFileKind.pdfExport);
 
-  Future<void> _exportGraphPng() => _exportGraphFormat(_GraphExportFormat.png);
+  Future<void> _exportGraphPng() =>
+      _exportGraphToOpsBrain(GraphFileKind.pngExport);
 
-  Future<void> _exportGraphFormat(_GraphExportFormat format) async {
-    try {
-      final kind = format == _GraphExportFormat.pdf
-          ? GraphFileKind.pdfExport
-          : GraphFileKind.pngExport;
-      final bytes = await _renderExportBytes(kind);
-      if (bytes == null || !mounted) return;
-      final fileName = buildGraphFileName(
-        _document.customer,
-        _document.createdAt,
-        kind,
-      );
-      final downloaded = switch (format) {
-        _GraphExportFormat.png => downloadGraphPng(bytes, fileName),
-        _GraphExportFormat.pdf =>
-          downloadGraphFile(bytes, fileName, 'application/pdf'),
-      };
-      if (!downloaded) {
-        _showCanvasMessage('Graph download is available in the web app');
-        return;
-      }
-      setState(() => _canvasStatus = 'Graph ${format.label} exported');
-    } catch (error) {
-      _showCanvasMessage(
-        'Graph export failed: $error',
-        severity: _CanvasMessageSeverity.error,
-      );
-    }
-  }
-
-  // Shared rendering used by both local Export File downloads and
-  // "Save to Ops Brain" PDF File/PNG File uploads (item 8), so the two
-  // paths always produce byte-for-byte identical renders. Returns null
-  // (after showing its own message) when the canvas isn't ready yet;
-  // callers should simply stop in that case.
+  // Shared rendering for the PDF and PNG export actions. Returns null (after
+  // showing its own message) when the canvas isn't ready yet; callers stop.
   Future<Uint8List?> _renderExportBytes(GraphFileKind kind) async {
     final boundary = _canvasBoundaryKey.currentContext?.findRenderObject()
         as RenderRepaintBoundary?;
@@ -6561,10 +6535,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onFinish: _finishWallPath,
                           onClear: _confirmClearGraph,
                           onSaveGraphFile: _handleGraphFileSaveTapped,
-                          onSavePdfFile: () =>
-                              _saveExportToOpsBrain(GraphFileKind.pdfExport),
-                          onSavePngFile: () =>
-                              _saveExportToOpsBrain(GraphFileKind.pngExport),
                           onExportPdf: _exportGraphPdf,
                           onExportPng: _exportGraphPng,
                           onSaveAndCreateSalesBrainReport:
@@ -6753,14 +6723,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 }
 
-enum _GraphExportFormat {
-  pdf('PDF'),
-  png('PNG');
-
-  const _GraphExportFormat(this.label);
-  final String label;
-}
-
 class _TopEditorToolbar extends StatelessWidget {
   const _TopEditorToolbar({
     required this.onUndo,
@@ -6768,8 +6730,6 @@ class _TopEditorToolbar extends StatelessWidget {
     required this.onFinish,
     required this.onClear,
     required this.onSaveGraphFile,
-    required this.onSavePdfFile,
-    required this.onSavePngFile,
     required this.onExportPdf,
     required this.onExportPng,
     required this.onSaveAndCreateSalesBrainReport,
@@ -6790,8 +6750,6 @@ class _TopEditorToolbar extends StatelessWidget {
   final VoidCallback onFinish;
   final VoidCallback onClear;
   final VoidCallback onSaveGraphFile;
-  final VoidCallback onSavePdfFile;
-  final VoidCallback onSavePngFile;
   final VoidCallback onExportPdf;
   final VoidCallback onExportPng;
   final VoidCallback onSaveAndCreateSalesBrainReport;
@@ -6915,8 +6873,6 @@ class _TopEditorToolbar extends StatelessWidget {
                 tooltip: 'File actions',
                 onSelected: (action) => switch (action) {
                   _EditorFileAction.saveGraphFile => onSaveGraphFile(),
-                  _EditorFileAction.savePdfFile => onSavePdfFile(),
-                  _EditorFileAction.savePngFile => onSavePngFile(),
                   _EditorFileAction.exportPdf => onExportPdf(),
                   _EditorFileAction.exportPng => onExportPng(),
                   _EditorFileAction.saveAndCreateSalesBrainReport =>
@@ -6945,24 +6901,10 @@ class _TopEditorToolbar extends StatelessWidget {
                     ),
                   ),
                   PopupMenuItem(
-                    value: _EditorFileAction.savePdfFile,
-                    child: ListTile(
-                      leading: Icon(Icons.picture_as_pdf_outlined),
-                      title: Text('PDF File'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _EditorFileAction.savePngFile,
-                    child: ListTile(
-                      leading: Icon(Icons.image_outlined),
-                      title: Text('PNG File'),
-                    ),
-                  ),
-                  PopupMenuItem(
                     value: _EditorFileAction.saveAndCreateSalesBrainReport,
                     child: ListTile(
                       leading: Icon(Icons.receipt_long_outlined),
-                      title: Text('Save & Create Sales Brain Report'),
+                      title: Text('Save & Open Inspection Workflow'),
                     ),
                   ),
                   PopupMenuDivider(),
@@ -6997,7 +6939,7 @@ class _TopEditorToolbar extends StatelessWidget {
                     value: _EditorFileAction.newWithExistingStructure,
                     child: ListTile(
                       leading: Icon(Icons.difference_outlined),
-                      title: Text('+ New w/ Existing Structure'),
+                      title: Text('Copy Structure to New Graph'),
                     ),
                   ),
                 ],
@@ -8968,8 +8910,6 @@ enum _SaveConflictChoice { overwrite, saveAsNew, cancel }
 
 enum _EditorFileAction {
   saveGraphFile,
-  savePdfFile,
-  savePngFile,
   exportPdf,
   exportPng,
   saveAndCreateSalesBrainReport,

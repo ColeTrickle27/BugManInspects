@@ -607,13 +607,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('SAVE TO OPS BRAIN'), findsOneWidget);
     expect(find.text('Graph File'), findsOneWidget);
-    expect(find.text('PDF File'), findsOneWidget);
-    expect(find.text('PNG File'), findsOneWidget);
-    expect(find.text('Save & Create Sales Brain Report'), findsOneWidget);
+    expect(find.text('PDF File'), findsNothing);
+    expect(find.text('PNG File'), findsNothing);
+    expect(find.text('Save & Open Inspection Workflow'), findsOneWidget);
     expect(find.text('EXPORT FILE'), findsOneWidget);
     expect(find.text('Export PDF'), findsOneWidget);
     expect(find.text('Export PNG'), findsOneWidget);
-    expect(find.text('+ New w/ Existing Structure'), findsOneWidget);
+    expect(find.text('Copy Structure to New Graph'), findsOneWidget);
 
     // No BugMan Graphs portal is wired up for a bare _pumpEditor() session,
     // so a "Save to Ops Brain" action warns instead of silently no-op-ing.
@@ -624,11 +624,11 @@ void main() {
 
     await tester.tap(find.byTooltip('File actions'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('PDF File'));
+    await tester.tap(find.text('Export PDF'));
     await tester.pumpAndSettle();
     expect(
       find.text(
-        'Saving PDF/PNG files to Holloman Ops Brain is available when '
+        'Exporting PDF/PNG files to Holloman Ops Brain is available when '
         'BugMan Graphs is opened through Holloman Ops Brain',
       ),
       findsOneWidget,
@@ -636,7 +636,7 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
     expect(
       find.text(
-        'Saving PDF/PNG files to Holloman Ops Brain is available when '
+        'Exporting PDF/PNG files to Holloman Ops Brain is available when '
         'BugMan Graphs is opened through Holloman Ops Brain',
       ),
       findsOneWidget,
@@ -806,9 +806,8 @@ void main() {
     });
   }
 
-  testWidgets(
-      'PDF File and PNG File save rendered exports to Ops Brain, while '
-      'Export PDF/PNG stay local-only (item 8)', (tester) async {
+  testWidgets('Export PDF/PNG save the graph and rendered exports to Ops Brain',
+      (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
@@ -830,7 +829,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await chooseFileActionAndAwaitAsyncWork(tester, 'PDF File');
+    await chooseFileActionAndAwaitAsyncWork(tester, 'Export PDF');
+    expect(portal.saveExistingKeys, [null]);
     expect(portal.uploadExportCalls, hasLength(1));
     expect(portal.uploadExportCalls.single['contentType'], 'application/pdf');
     expect(
@@ -842,7 +842,8 @@ void main() {
       ),
     );
 
-    await chooseFileActionAndAwaitAsyncWork(tester, 'PNG File');
+    await chooseFileActionAndAwaitAsyncWork(tester, 'Export PNG');
+    expect(portal.saveExistingKeys, [null, portal.savedKey]);
     expect(portal.uploadExportCalls, hasLength(2));
     expect(portal.uploadExportCalls.last['contentType'], 'image/png');
     expect(
@@ -853,20 +854,43 @@ void main() {
         GraphFileKind.pngExport,
       ),
     );
+  });
 
-    // Export PDF / Export PNG never touch the Ops Brain portal -- they
-    // only trigger a local browser download attempt (which reports
-    // "Graph download is available in the web app" outside a real web
-    // build) and leave uploadExportCalls untouched.
-    await chooseFileActionAndAwaitAsyncWork(tester, 'Export PDF');
-    expect(portal.uploadExportCalls, hasLength(2));
+  testWidgets('Export stops before upload when its automatic graph save fails',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final portal = _FakeBugManPortalService()
+      ..saveError = Exception('Ops Brain graph save failed.');
+    final job = Job(
+      customerName: 'Export Save Failure Test',
+      serviceAddress: '',
+      pestPacLocationNumber: 'LOC-10',
+      pestPacBillToNumber: 'BILL-10',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 8, 6),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GraphCanvasScreen(
+          document: GraphDocument.forJob(job),
+          portalService: portal,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-    await chooseFileActionAndAwaitAsyncWork(tester, 'Export PNG');
-    expect(portal.uploadExportCalls, hasLength(2));
+    await chooseFileAction(tester, 'Export PNG');
+
+    expect(portal.saveCallCount, 1);
+    expect(portal.uploadExportCalls, isEmpty);
+    expect(find.textContaining('Graph could not be saved'), findsOneWidget);
   });
 
   testWidgets(
-      'Saving PDF/PNG to Ops Brain is unavailable outside Holloman Ops '
+      'Exporting PDF/PNG to Ops Brain is unavailable outside Holloman Ops '
       'Brain, and never calls uploadGraphExport (item 8)', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
@@ -889,10 +913,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await chooseFileAction(tester, 'PNG File');
+    await chooseFileAction(tester, 'Export PNG');
     expect(
       find.text(
-        'Saving PDF/PNG files to Holloman Ops Brain is available when '
+        'Exporting PDF/PNG files to Holloman Ops Brain is available when '
         'BugMan Graphs is opened through Holloman Ops Brain',
       ),
       findsOneWidget,
@@ -901,8 +925,8 @@ void main() {
   });
 
   testWidgets(
-      'Save & Create Sales Brain Report saves the graph then navigates to '
-      'the resolved Sales Brain URL (item 14)', (tester) async {
+      'Save & Open Inspection Workflow saves the graph then opens the '
+      'resolved inspection workflow (item 14)', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
@@ -929,7 +953,7 @@ void main() {
     // document -- "no Ops Brain key yet" is not the same thing as
     // "nothing to save".
     await tester.runAsync(() async {
-      await chooseFileAction(tester, 'Save & Create Sales Brain Report');
+      await chooseFileAction(tester, 'Save & Open Inspection Workflow');
     });
 
     expect(portal.saveCallCount, 1);
@@ -937,7 +961,7 @@ void main() {
   });
 
   testWidgets(
-      'Save & Create Sales Brain Report warns instead of navigating when '
+      'Save & Open Inspection Workflow warns instead of navigating when '
       'PestPac identifiers are missing (item 14)', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
@@ -960,13 +984,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await chooseFileAction(tester, 'Save & Create Sales Brain Report');
+    await chooseFileAction(tester, 'Save & Open Inspection Workflow');
 
     expect(portal.saveCallCount, 0);
     expect(
       find.textContaining(
-        'needs a customer with a Bill-To and Location before creating a '
-        'Sales Brain report',
+        'needs a customer with a Bill-To and Location before opening the '
+        'inspection workflow',
       ),
       findsOneWidget,
     );
@@ -1779,6 +1803,7 @@ class _FakeBugManPortalService implements BugManPortalService {
   // existingKey throw the exact server 404 error text, so tests can
   // exercise the "Saved graph not found" recovery path.
   final notFoundExistingKeys = <String>{};
+  Object? saveError;
   bool available = true;
   int saveCallCount = 0;
 
@@ -1797,6 +1822,7 @@ class _FakeBugManPortalService implements BugManPortalService {
   }) async {
     saveCallCount += 1;
     saveExistingKeys.add(existingKey);
+    if (saveError != null) throw saveError!;
     if (existingKey != null && notFoundExistingKeys.contains(existingKey)) {
       throw Exception('Saved graph not found.');
     }

@@ -9,17 +9,23 @@ The app currently focuses on the graph editor workflow:
 - Graph Canvas
 - Drawing/editing tools for walls, property lines, shapes, markers, photos, and text
 
-## Hosted preview
+## Production site
 
-GitHub Pages deploys the Flutter Web app from `main`.
+BugMan Graphs is served through Cloudflare Pages.
 
 Live URL:
 
 ```text
-https://coletrickle27.github.io/BugManInspects/
+https://graphs.holloman-ext.com/
 ```
 
-Every push to `main` runs the GitHub Actions workflow in `.github/workflows/deploy-web.yml`, then publishes `build/web`.
+The GitHub Actions workflow in `.github/workflows/deploy-cloudflare.yml`
+builds and publishes `build/web` when `main` changes. An approved direct
+release uses the same Cloudflare Pages project:
+
+```sh
+npx --yes wrangler pages deploy build/web --project-name=bugman-graphs --branch=main
+```
 
 ## Local setup
 
@@ -59,5 +65,5 @@ Before pushing feature work, run:
 ```sh
 flutter analyze
 flutter test
-flutter build web --release --base-href /BugManInspects/
+flutter build web --release
 ```

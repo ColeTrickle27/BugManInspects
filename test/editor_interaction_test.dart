@@ -290,7 +290,7 @@ void main() {
         topEdge,
         referencePoint: const Offset(120, 100),
       ).dy,
-      lessThan(0),
+      lessThanOrEqualTo(-28),
     );
   });
 
