@@ -43,6 +43,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
   late final TraceMapProvider _provider;
   late final AddressSuggestionService _addressService;
   late final TextEditingController _addressController;
+  late final GeoPoint? _savedTraceCenter;
   final List<GeoPoint> _points = <GeoPoint>[];
   final Random _random = Random.secure();
   Timer? _searchDebounce;
@@ -62,6 +63,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
     _addressService = widget.addressService ?? createAddressSuggestionService();
     _addressController = TextEditingController(text: widget.address);
     _points.addAll(widget.initialTrace?.geoPoints ?? const <GeoPoint>[]);
+    _savedTraceCenter = _centerFor(_points);
     _sessionToken = _newSessionToken();
     _initializeWorkspace();
   }
@@ -206,6 +208,21 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
         ),
         status: MeasurementAccuracyStatus.estimated,
       );
+
+  GeoPoint? _centerFor(List<GeoPoint> points) {
+    if (points.isEmpty) return null;
+    final latitude = points.fold<double>(
+          0,
+          (total, point) => total + point.latitude,
+        ) /
+        points.length;
+    final longitude = points.fold<double>(
+          0,
+          (total, point) => total + point.longitude,
+        ) /
+        points.length;
+    return GeoPoint(latitude: latitude, longitude: longitude);
+  }
 
   void _finish() {
     if (_points.length < 3) return;
@@ -424,8 +441,11 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
     if (_initializingMap) {
       return const Center(child: CircularProgressIndicator());
     }
-    final center = _selectedAddress?.coordinate;
-    if (_error != null || center == null) {
+    // A saved trace already has geographic points. Use their center while an
+    // optional job-address lookup is pending or unavailable, so reopening a
+    // trace never leaves the editor on an indefinite searching screen.
+    final center = _selectedAddress?.coordinate ?? _savedTraceCenter;
+    if (center == null) {
       return Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 540),

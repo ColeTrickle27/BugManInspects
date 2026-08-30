@@ -138,6 +138,43 @@ void main() {
     expect(result!.geoPoints[1].longitude, -86.00015);
   });
 
+  testWidgets(
+      'existing trace opens from saved points while job-address lookup is pending',
+      (tester) async {
+    final provider = _FakeTraceMapProvider();
+    final addressService = _DelayedAddressSuggestionService();
+    const original = TraceGeometry(
+      id: 'property-trace-3',
+      label: 'Property Trace 3',
+      geoPoints: [
+        GeoPoint(latitude: 35.0, longitude: -86.0),
+        GeoPoint(latitude: 35.0003, longitude: -86.0003),
+        GeoPoint(latitude: 35.0006, longitude: -86.0),
+      ],
+      canvasPoints: [],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TraceWorkspaceScreen(
+          address: '123 Main Street',
+          canvasSize: const Size(3600, 2600),
+          traceLabel: original.label,
+          initialTrace: original,
+          provider: provider,
+          addressService: addressService,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(addressService.requests, ['123 Main Street']);
+    expect(find.byKey(const ValueKey('fake-trace-map')), findsOneWidget);
+    expect(provider.selectedAddress, isNotNull);
+    expect(provider.selectedAddress!.latitude, closeTo(35.0003, 0.0000001));
+    expect(provider.selectedAddress!.longitude, closeTo(-86.0001, 0.0000001));
+  });
+
   testWidgets('trace workspace ignores a stale suggestion request',
       (tester) async {
     final service = _DelayedAddressSuggestionService();
