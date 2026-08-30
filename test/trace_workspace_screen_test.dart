@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets(
-      'trace workspace requires a selected address and returns scaled trace',
+      'trace workspace opens at the job address and returns a scaled trace',
       (tester) async {
     final provider = _FakeTraceMapProvider();
     final addressService = _FakeAddressSuggestionService();
@@ -48,14 +48,9 @@ void main() {
     final field = tester.widget<TextField>(
       find.byKey(const ValueKey('trace-address-field')),
     );
-    expect(field.controller?.text, '123 Main Street');
-    expect(find.byKey(const ValueKey('trace-address-suggestions')),
-        findsOneWidget);
-
-    await tester.tap(
-      find.byKey(const ValueKey('trace-address-suggestion-test-address')),
-    );
-    await tester.pumpAndSettle();
+    expect(field.controller?.text, '123 Main Street, Raleigh, NC 27601');
+    expect(
+        find.byKey(const ValueKey('trace-address-suggestions')), findsNothing);
     expect(
         provider.selectedAddress, const GeoPoint(latitude: 35, longitude: -86));
     expect(find.text('Property-level location'), findsOneWidget);
@@ -75,6 +70,72 @@ void main() {
     expect(result!.geoPoints, hasLength(3));
     expect(result!.canvasPoints, hasLength(3));
     expect(result!.metersPerCanvasUnit, greaterThan(0));
+  });
+
+  testWidgets(
+      'existing trace reopens at the job address and keeps points editable',
+      (tester) async {
+    final provider = _FakeTraceMapProvider();
+    final addressService = _FakeAddressSuggestionService();
+    TraceGeometry? result;
+    const original = TraceGeometry(
+      id: 'property-trace-2',
+      label: 'Property Trace 2',
+      geoPoints: [
+        GeoPoint(latitude: 35.0, longitude: -86.0),
+        GeoPoint(latitude: 35.0001, longitude: -86.0001),
+        GeoPoint(latitude: 35.0002, longitude: -86.0002),
+      ],
+      canvasPoints: [],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => FilledButton(
+            onPressed: () async {
+              result = await Navigator.push<TraceGeometry>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TraceWorkspaceScreen(
+                    address: '123 Main Street',
+                    canvasSize: const Size(3600, 2600),
+                    traceLabel: original.label,
+                    initialTrace: original,
+                    provider: provider,
+                    addressService: addressService,
+                  ),
+                ),
+              );
+            },
+            child: const Text('Edit Trace'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Edit Trace'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit Property Trace 2'), findsOneWidget);
+    expect(
+        provider.selectedAddress, const GeoPoint(latitude: 35, longitude: -86));
+    expect(provider.points, hasLength(3));
+    expect(provider.points[1].latitude, 35.0001);
+
+    provider.moveVertex(
+      1,
+      const GeoPoint(latitude: 35.00015, longitude: -86.00015),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('finish-trace-button')));
+    await tester.pumpAndSettle();
+
+    expect(result, isNotNull);
+    expect(result!.id, original.id);
+    expect(result!.label, original.label);
+    expect(result!.geoPoints[1].latitude, 35.00015);
+    expect(result!.geoPoints[1].longitude, -86.00015);
   });
 
   testWidgets('trace workspace ignores a stale suggestion request',
@@ -119,6 +180,8 @@ void main() {
 
 class _FakeTraceMapProvider implements TraceMapProvider {
   GeoPoint? selectedAddress;
+  List<GeoPoint> points = const <GeoPoint>[];
+  void Function(int index, GeoPoint point)? _onVertexMoved;
 
   @override
   Future<void> initialize() async {}
@@ -132,6 +195,8 @@ class _FakeTraceMapProvider implements TraceMapProvider {
     required void Function(int index, GeoPoint point) onVertexMoved,
   }) {
     this.selectedAddress = selectedAddress;
+    this.points = List<GeoPoint>.of(points);
+    _onVertexMoved = onVertexMoved;
     return GestureDetector(
       key: const ValueKey('fake-trace-map'),
       behavior: HitTestBehavior.opaque,
@@ -147,6 +212,8 @@ class _FakeTraceMapProvider implements TraceMapProvider {
       child: const ColoredBox(color: Colors.blueGrey),
     );
   }
+
+  void moveVertex(int index, GeoPoint point) => _onVertexMoved!(index, point);
 }
 
 class _FakeAddressSuggestionService implements AddressSuggestionService {

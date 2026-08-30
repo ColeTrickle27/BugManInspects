@@ -91,7 +91,7 @@ Future<void> _placeTermiteActivityMarker(
   );
   await _expandToolbarSection(
     tester,
-    'Inspection Markers',
+    'Inspect',
     markerTool,
   );
   await tester.ensureVisible(markerTool);
@@ -139,9 +139,7 @@ void main() {
 
       // Change size via the Size slider's callback directly (avoids
       // fragile pixel-perfect drag-distance math) and set as default.
-      final sizeSlider = tester
-          .widgetList<Slider>(find.byType(Slider))
-          .first;
+      final sizeSlider = tester.widgetList<Slider>(find.byType(Slider)).first;
       const newSize = 1.7;
       expect(newSize, isNot(originalSecondSize));
       sizeSlider.onChanged!(newSize);
@@ -171,8 +169,7 @@ void main() {
       await _placeTermiteActivityMarker(tester, const Offset(400, 350));
       expect(_annotations(tester).length, 1);
       expect(_annotations(tester)[0].size, newSize,
-          reason:
-              'a marker placed after a simulated restart must use the '
+          reason: 'a marker placed after a simulated restart must use the '
               'persisted default, not the built-in default');
     },
   );

@@ -4585,28 +4585,82 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       editIndex = await showModalBottomSheet<int>(
         context: context,
         showDragHandle: true,
-        builder: (context) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const ListTile(
-                title: Text('Satellite traces'),
-                subtitle: Text('Create a trace or edit an existing outline.'),
+        builder: (context) {
+          final jobAddress = _document.customer.serviceAddress.trim();
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.72,
               ),
-              ListTile(
-                leading: const Icon(Icons.add),
-                title: const Text('New Trace'),
-                onTap: () => Navigator.pop(context, -1),
-              ),
-              for (var index = 0; index < _traces.length; index += 1)
-                ListTile(
-                  leading: const Icon(Icons.edit_location_alt_outlined),
-                  title: Text(_traces[index].label),
-                  onTap: () => Navigator.pop(context, index),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.satellite_alt_outlined),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Satellite traces',
+                                  style: TextStyle(fontWeight: FontWeight.w800),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Start another structure or refine a saved outline.',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      FilledButton.icon(
+                        key: const ValueKey('new-trace-button'),
+                        icon: const Icon(Icons.add),
+                        label: const Text('New Trace'),
+                        onPressed: () => Navigator.pop(context, -1),
+                      ),
+                      if (jobAddress.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8, bottom: 6),
+                          child: Text(
+                            'Opens at $jobAddress',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      const Divider(height: 28),
+                      for (var index = 0; index < _traces.length; index += 1)
+                        Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: ListTile(
+                            leading:
+                                const Icon(Icons.edit_location_alt_outlined),
+                            title: Text(_traces[index].label),
+                            subtitle: Text(
+                              jobAddress.isEmpty
+                                  ? 'Edit saved corner points'
+                                  : 'Open at the job address and edit corner points',
+                            ),
+                            trailing:
+                                const Icon(Icons.arrow_forward_ios, size: 16),
+                            onTap: () => Navigator.pop(context, index),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-            ],
-          ),
-        ),
+              ),
+            ),
+          );
+        },
       );
       if (!mounted || editIndex == null) return;
       if (editIndex == -1) editIndex = null;
@@ -4618,7 +4672,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         builder: (context) => TraceWorkspaceScreen(
           address: _document.customer.serviceAddress,
           canvasSize: _canvasSize,
-          traceLabel: 'Property Trace ${_traces.length + 1}',
+          traceLabel:
+              initialTrace?.label ?? 'Property Trace ${_traces.length + 1}',
           initialTrace: initialTrace,
         ),
       ),
@@ -6445,7 +6500,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                         left: 12,
                         top: 54,
                         bottom: 12,
-                        width: 72,
+                        width: 112,
                         child: CanvasToolbar(
                           selectedTool: _selectedTool,
                           selectedMarkerType: _selectedMarkerType,

@@ -7,7 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets(
-    'trace map caps imagery at the finest supported level and uses compact pins',
+    'trace map offers closer display zoom while retaining native imagery and compact pins',
     (tester) async {
       final provider = NorthCarolinaTraceMapProvider();
       final points = <GeoPoint>[
@@ -35,18 +35,19 @@ void main() {
 
       expect(
         tester.widget<FlutterMap>(find.byType(FlutterMap)).options.maxZoom,
-        20,
+        22,
       );
-      expect(
-        tester.widget<TileLayer>(find.byType(TileLayer)).maxNativeZoom,
-        20,
-      );
+      final tileLayer = tester.widget<TileLayer>(find.byType(TileLayer));
+      expect(tileLayer.maxNativeZoom, 20);
+      expect(tileLayer.maxZoom, 22);
+      expect(find.byKey(const ValueKey('trace-map-zoom-in')), findsOneWidget);
+      expect(find.byKey(const ValueKey('trace-map-zoom-out')), findsOneWidget);
 
       final markers =
           tester.widget<DragMarkers>(find.byType(DragMarkers)).markers;
       expect(markers, hasLength(2));
       for (final marker in markers) {
-        expect(marker.size, const Size(36, 36));
+        expect(marker.size, const Size(32, 32));
       }
     },
   );

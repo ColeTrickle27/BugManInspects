@@ -1161,7 +1161,7 @@ void main() {
       'Quick Measure\nHold and drag to customize quick tools',
     );
     final quickToolbar = find.byKey(const ValueKey('canvas-quick-toolbar'));
-    await _expandToolbarSection(tester, 'Basic', quickMeasure);
+    await _expandToolbarSection(tester, 'Draw', quickMeasure);
     expect(quickMeasure, findsOneWidget);
     expect(quickToolbar, findsOneWidget);
 
@@ -1232,7 +1232,7 @@ void main() {
     );
     await _expandToolbarSection(
       tester,
-      'Inspection Markers',
+      'Inspect',
       moistureTool,
     );
     await tester.ensureVisible(moistureTool);
@@ -1292,7 +1292,7 @@ void main() {
     );
     await _expandToolbarSection(
       tester,
-      'Inspection Markers',
+      'Inspect',
       photoTool,
     );
     await tester.ensureVisible(photoTool);
@@ -1391,10 +1391,10 @@ void main() {
 
       expect(matrix.entry(0, 3), closeTo((viewport.width - 3600) / 2, 0.1));
       expect(matrix.entry(1, 3), closeTo((viewport.height - 2600) / 2, 0.1));
-      expect(find.text('Basic'), findsOneWidget);
-      expect(find.text('Structures'), findsOneWidget);
-      expect(find.text('Inspection Markers'), findsOneWidget);
-      expect(find.text('Treatment Markers'), findsOneWidget);
+      expect(find.text('Draw'), findsOneWidget);
+      expect(find.text('Build'), findsOneWidget);
+      expect(find.text('Inspect'), findsOneWidget);
+      expect(find.text('Treat'), findsOneWidget);
       expect(find.byType(CanvasQuickToolbar), findsOneWidget);
       expect(find.byTooltip('Select (V)'), findsOneWidget);
       expect(find.byTooltip('Pan (H)'), findsOneWidget);
@@ -1551,7 +1551,7 @@ void main() {
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
     final picker = find.byTooltip('Treatment Marker: Treatment Area');
-    await _expandToolbarSection(tester, 'Treatment Markers', picker);
+    await _expandToolbarSection(tester, 'Treat', picker);
     await tester.ensureVisible(picker);
     await tester.pumpAndSettle();
     await tester.tap(picker);
@@ -1578,7 +1578,7 @@ void main() {
     await _pumpEditor(tester);
 
     final treatmentNote = find.byTooltip('Treatment Note');
-    await _expandToolbarSection(tester, 'Treatment Markers', treatmentNote);
+    await _expandToolbarSection(tester, 'Treat', treatmentNote);
     await tester.tap(treatmentNote);
     await tester.pumpAndSettle();
 
@@ -1719,7 +1719,7 @@ Future<void> _secondaryClick(WidgetTester tester, Offset position) async {
 }
 
 Future<void> _selectStructure(WidgetTester tester, String label) async {
-  await _expandToolbarSection(tester, 'Structures', find.text('MAIN'));
+  await _expandToolbarSection(tester, 'Build', find.text('MAIN'));
   if (label == 'Main Structure') {
     await tester.ensureVisible(find.text('MAIN'));
     await tester.pumpAndSettle();
@@ -1737,7 +1737,7 @@ Future<void> _selectStructure(WidgetTester tester, String label) async {
 }
 
 Future<void> _selectBasicShape(WidgetTester tester, String label) async {
-  await _expandToolbarSection(tester, 'Basic', find.text('Basic Shapes'));
+  await _expandToolbarSection(tester, 'Draw', find.text('Basic Shapes'));
   await tester.ensureVisible(find.text('Basic Shapes'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Basic Shapes'));
@@ -1747,7 +1747,7 @@ Future<void> _selectBasicShape(WidgetTester tester, String label) async {
 }
 
 Future<void> _selectPropertyTool(WidgetTester tester, String label) async {
-  await _expandToolbarSection(tester, 'Structures', find.text('Property'));
+  await _expandToolbarSection(tester, 'Build', find.text('Property'));
   await tester.ensureVisible(find.text('Property'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Property'));
@@ -1757,7 +1757,7 @@ Future<void> _selectPropertyTool(WidgetTester tester, String label) async {
 }
 
 Future<void> _selectLineTool(WidgetTester tester, String label) async {
-  await _expandToolbarSection(tester, 'Basic', find.text('Lines'));
+  await _expandToolbarSection(tester, 'Draw', find.text('Lines'));
   await tester.ensureVisible(find.text('Lines'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Lines'));

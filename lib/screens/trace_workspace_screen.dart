@@ -21,6 +21,7 @@ class TraceWorkspaceScreen extends StatefulWidget {
     this.provider,
     this.addressService,
     this.initialTrace,
+    this.autoSelectJobAddress = true,
     super.key,
   });
 
@@ -30,6 +31,7 @@ class TraceWorkspaceScreen extends StatefulWidget {
   final TraceMapProvider? provider;
   final AddressSuggestionService? addressService;
   final TraceGeometry? initialTrace;
+  final bool autoSelectJobAddress;
 
   @override
   State<TraceWorkspaceScreen> createState() => _TraceWorkspaceScreenState();
@@ -127,6 +129,14 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
         sessionToken: sessionToken,
       );
       if (!mounted || request != _searchRequest) return;
+      if (_shouldAutoSelectJobAddress(query, suggestions)) {
+        setState(() {
+          _searching = false;
+          _suggestions = const <AddressSuggestion>[];
+        });
+        await _selectAddress(suggestions.single);
+        return;
+      }
       setState(() {
         _searching = false;
         _suggestions = suggestions;
@@ -143,6 +153,15 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
       });
     }
   }
+
+  bool _shouldAutoSelectJobAddress(
+    String query,
+    List<AddressSuggestion> suggestions,
+  ) =>
+      widget.autoSelectJobAddress &&
+      _selectedAddress == null &&
+      query == widget.address.trim() &&
+      suggestions.length == 1;
 
   Future<void> _selectAddress(AddressSuggestion suggestion) async {
     _searchDebounce?.cancel();
@@ -209,9 +228,14 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
   @override
   Widget build(BuildContext context) {
     final measurement = _measurement;
+    final editingTrace = widget.initialTrace != null;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Satellite Trace'),
+        title: Text(
+          editingTrace
+              ? 'Edit ${widget.initialTrace!.label}'
+              : 'New Satellite Trace',
+        ),
         actions: [
           IconButton(
             tooltip: 'Undo last trace point',
@@ -259,7 +283,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
                     key: const ValueKey('finish-trace-button'),
                     onPressed: _points.length >= 3 ? _finish : null,
                     icon: const Icon(Icons.check),
-                    label: const Text('Finish Trace'),
+                    label: Text(editingTrace ? 'Save Trace' : 'Finish Trace'),
                   ),
                 ],
               ),
@@ -279,6 +303,21 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.address.trim().isNotEmpty)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.location_on_outlined, size: 18),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Map opens at this job address. Change it only for a different property.',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Row(
               children: [
                 Expanded(
@@ -290,7 +329,8 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
                         _scheduleSuggestionSearch(immediate: true),
                     decoration: const InputDecoration(
                       labelText: 'Location Address',
-                      hintText: 'Start typing, then choose the address',
+                      hintText:
+                          'Use this job address or choose another property',
                       prefixIcon: Icon(Icons.location_on_outlined),
                     ),
                   ),
@@ -397,13 +437,12 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
                 const Icon(Icons.map_outlined, size: 54),
                 const SizedBox(height: 12),
                 Text(
-                  _error ??
-                      'Enter at least 3 characters, then choose an address suggestion.',
+                  _error ?? 'Finding the job address…',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Address suggestions confirm the selected location. NC OneMap '
+                  'If needed, edit the address and choose a result. NC OneMap '
                   'aerial imagery remains the tracing map.',
                   textAlign: TextAlign.center,
                 ),
@@ -435,7 +474,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
             child: Padding(
               padding: EdgeInsets.all(10),
               child: Text(
-                'Blue crosshair: selected address. Tap property corners; drag numbered pins to adjust.',
+                'Zoom to the structure, tap each corner, then drag a numbered point to refine it.',
               ),
             ),
           ),

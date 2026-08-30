@@ -26,32 +26,109 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
     required List<GeoPoint> points,
     required ValueChanged<GeoPoint> onMapTap,
     required void Function(int index, GeoPoint point) onVertexMoved,
-  }) {
+  }) =>
+      _NorthCarolinaTraceMap(
+        imageryTileUrl: _imageryTileUrl,
+        center: center,
+        selectedAddress: selectedAddress,
+        points: points,
+        onMapTap: onMapTap,
+        onVertexMoved: onVertexMoved,
+      );
+}
+
+class _NorthCarolinaTraceMap extends StatefulWidget {
+  const _NorthCarolinaTraceMap({
+    required this.imageryTileUrl,
+    required this.center,
+    required this.selectedAddress,
+    required this.points,
+    required this.onMapTap,
+    required this.onVertexMoved,
+  });
+
+  final String imageryTileUrl;
+  final GeoPoint center;
+  final GeoPoint selectedAddress;
+  final List<GeoPoint> points;
+  final ValueChanged<GeoPoint> onMapTap;
+  final void Function(int index, GeoPoint point) onVertexMoved;
+
+  @override
+  State<_NorthCarolinaTraceMap> createState() => _NorthCarolinaTraceMapState();
+}
+
+class _NorthCarolinaTraceMapState extends State<_NorthCarolinaTraceMap> {
+  static const _minimumZoom = 4.0;
+  static const _maximumDisplayZoom = 22.0;
+  static const _maximumNativeZoom = 20;
+
+  final MapController _mapController = MapController();
+  bool _mapReady = false;
+
+  @override
+  void didUpdateWidget(covariant _NorthCarolinaTraceMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_mapReady ||
+        _samePoint(oldWidget.selectedAddress, widget.selectedAddress)) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_mapReady) return;
+      final camera = _mapController.camera;
+      _mapController.move(
+        latlong.LatLng(
+          widget.selectedAddress.latitude,
+          widget.selectedAddress.longitude,
+        ),
+        camera.zoom < 19 ? 19 : camera.zoom,
+      );
+    });
+  }
+
+  void _zoomBy(double amount) {
+    if (!_mapReady) return;
+    final camera = _mapController.camera;
+    final nextZoom = (camera.zoom + amount)
+        .clamp(_minimumZoom, _maximumDisplayZoom)
+        .toDouble();
+    _mapController.move(camera.center, nextZoom);
+  }
+
+  bool _samePoint(GeoPoint first, GeoPoint second) =>
+      first.latitude == second.latitude && first.longitude == second.longitude;
+
+  @override
+  Widget build(BuildContext context) {
     final mapPoints = <latlong.LatLng>[
-      for (final point in points)
+      for (final point in widget.points)
         latlong.LatLng(point.latitude, point.longitude),
     ];
     return Stack(
       children: [
         FlutterMap(
+          mapController: _mapController,
           options: MapOptions(
             initialCenter: latlong.LatLng(
-              center.latitude,
-              center.longitude,
+              widget.center.latitude,
+              widget.center.longitude,
             ),
             initialZoom: 19,
             initialCameraFit: mapPoints.length >= 2
                 ? CameraFit.coordinates(
                     coordinates: mapPoints,
                     padding: const EdgeInsets.all(56),
-                    maxZoom: 19,
+                    maxZoom: _maximumNativeZoom.toDouble(),
                   )
                 : null,
-            minZoom: 4,
-            // The NC OneMap cache's usable finest scale is level 20. Allowing
-            // level 21 requests blank tiles, which leaves the trace map white.
-            maxZoom: 20,
-            onTap: (_, position) => onMapTap(
+            minZoom: _minimumZoom,
+            // NC OneMap's imagery is natively available through level 20.
+            // Display zooms 21–22 rescale those level-20 tiles rather than
+            // requesting blank level-21 tiles, so close corners can be placed
+            // precisely without changing the saved geographic points.
+            maxZoom: _maximumDisplayZoom,
+            onMapReady: () => setState(() => _mapReady = true),
+            onTap: (_, position) => widget.onMapTap(
               GeoPoint(
                 latitude: position.latitude,
                 longitude: position.longitude,
@@ -60,8 +137,9 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
           ),
           children: [
             TileLayer(
-              urlTemplate: _imageryTileUrl,
-              maxNativeZoom: 20,
+              urlTemplate: widget.imageryTileUrl,
+              maxZoom: _maximumDisplayZoom,
+              maxNativeZoom: _maximumNativeZoom,
               userAgentPackageName: 'com.holloman.bugman_graphs',
             ),
             // This is a temporary trace-workspace aid only. It represents the
@@ -71,18 +149,18 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
               markers: [
                 Marker(
                   point: latlong.LatLng(
-                    selectedAddress.latitude,
-                    selectedAddress.longitude,
+                    widget.selectedAddress.latitude,
+                    widget.selectedAddress.longitude,
                   ),
-                  width: 40,
-                  height: 40,
+                  width: 32,
+                  height: 32,
                   child: const Tooltip(
                     message: 'Selected address',
                     child: Icon(
                       Icons.gps_fixed,
                       key: ValueKey('trace-search-result-pin'),
                       color: Color(0xFF1565C0),
-                      size: 34,
+                      size: 28,
                     ),
                   ),
                 ),
@@ -114,17 +192,17 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
                 for (var index = 0; index < mapPoints.length; index += 1)
                   DragMarker(
                     point: mapPoints[index],
-                    // Keep a comfortable drag target while making the visible
-                    // pin small enough to place close property corners.
-                    size: const Size(36, 36),
+                    // The tap area remains practical for field use while the
+                    // visible pin stays small enough for tight corners.
+                    size: const Size(32, 32),
                     builder: (context, position, isDragging) => Center(
                       child: SizedBox(
-                        width: 28,
-                        height: 28,
+                        width: 20,
+                        height: 20,
                         child: _VertexPin(number: index + 1),
                       ),
                     ),
-                    onDragEnd: (_, position) => onVertexMoved(
+                    onDragEnd: (_, position) => widget.onVertexMoved(
                       index,
                       GeoPoint(
                         latitude: position.latitude,
@@ -135,6 +213,15 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
               ],
             ),
           ],
+        ),
+        Positioned(
+          right: 12,
+          top: 12,
+          child: _MapZoomControls(
+            enabled: _mapReady,
+            onZoomIn: () => _zoomBy(1),
+            onZoomOut: () => _zoomBy(-1),
+          ),
         ),
         const Positioned(
           right: 6,
@@ -153,6 +240,44 @@ class NorthCarolinaTraceMapProvider implements TraceMapProvider {
       ],
     );
   }
+}
+
+class _MapZoomControls extends StatelessWidget {
+  const _MapZoomControls({
+    required this.enabled,
+    required this.onZoomIn,
+    required this.onZoomOut,
+  });
+
+  final bool enabled;
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        elevation: 4,
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              key: const ValueKey('trace-map-zoom-in'),
+              tooltip: 'Zoom in closer',
+              constraints: const BoxConstraints.tightFor(width: 42, height: 42),
+              onPressed: enabled ? onZoomIn : null,
+              icon: const Icon(Icons.add),
+            ),
+            const SizedBox(width: 32, child: Divider(height: 1)),
+            IconButton(
+              key: const ValueKey('trace-map-zoom-out'),
+              tooltip: 'Zoom out',
+              constraints: const BoxConstraints.tightFor(width: 42, height: 42),
+              onPressed: enabled ? onZoomOut : null,
+              icon: const Icon(Icons.remove),
+            ),
+          ],
+        ),
+      );
 }
 
 class _VertexPin extends StatelessWidget {
@@ -177,7 +302,7 @@ class _VertexPin extends StatelessWidget {
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
-            fontSize: 12,
+            fontSize: 9,
           ),
         ),
       ),
