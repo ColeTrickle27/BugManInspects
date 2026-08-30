@@ -1,4 +1,4 @@
-import 'dart:html' as html;
+import 'package:web/web.dart' as web;
 
 /// Navigates the top-level browser window to a Sales Brain report handoff
 /// URL (item 14 of the production pass). When BugMan Graphs is embedded as
@@ -7,6 +7,6 @@ import 'dart:html' as html;
 /// failing) to load it inside the small graph iframe; when running
 /// standalone, `window.top` is just `window` itself.
 void navigateToSalesBrainReport(String url) {
-  final top = html.window.top ?? html.window;
+  final top = web.window.top ?? web.window;
   top.location.href = url;
 }
