@@ -18,6 +18,19 @@ enum GraphDrawingPresetKind {
   line,
 }
 
+/// The foundation condition recorded with a main structure. It is stored in
+/// [GraphShape.extraProperties] so older saved graphs remain valid.
+enum StructureFoundationType {
+  crawlspace('Crawlspace'),
+  slab('Slab'),
+  basement('Basement'),
+  combination('Combination');
+
+  const StructureFoundationType(this.label);
+
+  final String label;
+}
+
 enum GraphDrawingPreset {
   mainStructure(
     'Main Structure',
@@ -203,16 +216,16 @@ enum GraphDrawingPreset {
   ),
   measurementLine(
     'Quick Measure',
-    'QUICK',
-    GraphDrawingPresetKind.line,
-    null,
-    0,
+    'MEASURE',
+    GraphDrawingPresetKind.area,
+    Color(0xFF4D9CFF),
+    0.14,
     Color(0xFF245BDB),
-    2,
+    3,
     GraphShapePattern.none,
     Color(0xFF245BDB),
     3,
-    LinePatternValue.solid,
+    LinePatternValue.dashed,
   ),
   treatmentArea(
     'Treatment Area',
@@ -265,6 +278,7 @@ extension GraphDrawingPresetMeasurements on GraphDrawingPreset {
         GraphDrawingPreset.dirtFilledPorch,
         GraphDrawingPreset.garage,
         GraphDrawingPreset.detachedStructure,
+        GraphDrawingPreset.measurementLine,
       }.contains(this);
 
   bool get showsPropertyAreaMeasurements =>
@@ -310,6 +324,15 @@ class GraphShape {
   final Map<String, Object?> extraProperties;
 
   bool get isStructure => preset != null;
+
+  StructureFoundationType? get foundationType {
+    final rawValue = extraProperties['foundationType'];
+    if (rawValue is! String) return null;
+    for (final type in StructureFoundationType.values) {
+      if (type.name == rawValue) return type;
+    }
+    return null;
+  }
 
   GraphShape copyWith({
     String? name,

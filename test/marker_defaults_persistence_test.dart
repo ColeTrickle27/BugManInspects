@@ -91,7 +91,7 @@ Future<void> _placeTermiteActivityMarker(
   );
   await _expandToolbarSection(
     tester,
-    'Inspect',
+    'Inspection Findings',
     markerTool,
   );
   await tester.ensureVisible(markerTool);

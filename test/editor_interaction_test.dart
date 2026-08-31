@@ -112,17 +112,20 @@ void main() {
     expect(structureToolbarPresets,
         isNot(contains(GraphDrawingPreset.treatmentArea)));
     expect(basicLineToolbarActions.map((action) => action.tool), [
-      CanvasTool.wall,
+      CanvasTool.callout,
+      CanvasTool.text,
       CanvasTool.arrow,
-      CanvasTool.curve,
       CanvasTool.freehand,
     ]);
     expect(basicShapeToolbarActions.map((action) => action.tool), [
       CanvasTool.rectangle,
       CanvasTool.circle,
-      CanvasTool.ellipse,
       CanvasTool.triangle,
     ]);
+    expect(structureToolbarPresets,
+        isNot(contains(GraphDrawingPreset.crawlspace)));
+    expect(structureToolbarPresets,
+        isNot(contains(GraphDrawingPreset.propertyLine)));
     expect(propertyToolbarActions.map((action) => action.preset), [
       GraphDrawingPreset.driveway,
       GraphDrawingPreset.walkway,
@@ -139,6 +142,8 @@ void main() {
     expect(CanvasTool.select.icon, Icons.navigation);
     expect(CanvasTool.pan.icon, Icons.pan_tool_outlined);
     expect(GraphDrawingPreset.measurementLine.label, 'Quick Measure');
+    expect(
+        GraphDrawingPreset.measurementLine.kind, GraphDrawingPresetKind.area);
   });
 
   test('structure and property summaries use approved measurement units', () {
@@ -184,11 +189,45 @@ void main() {
       rotationDegrees: 0,
       preset: GraphDrawingPreset.propertyLine,
     );
+    const quickMeasure = GraphShape(
+      name: 'Quick Measure',
+      segmentIndexes: [0, 1, 2, 3],
+      fillColor: Color(0xFF4D9CFF),
+      fillOpacity: 0.14,
+      borderColor: Color(0xFF245BDB),
+      borderWidth: 3,
+      pattern: GraphShapePattern.none,
+      closed: true,
+      rotationDegrees: 0,
+      preset: GraphDrawingPreset.measurementLine,
+    );
+    const mainStructureWithFoundation = GraphShape(
+      name: 'Main Structure',
+      segmentIndexes: [0, 1, 2, 3],
+      fillColor: Color(0xFFB6D94C),
+      fillOpacity: 0.3,
+      borderColor: Color(0xFF214D38),
+      borderWidth: 3,
+      pattern: GraphShapePattern.none,
+      closed: true,
+      rotationDegrees: 0,
+      preset: GraphDrawingPreset.mainStructure,
+      extraProperties: {'foundationType': 'crawlspace'},
+    );
 
     expect(shapeMeasurementSummary(structure, segments), '4 lf • 1 sf');
     expect(
       shapeMeasurementSummary(property, segments),
       '0.0 ac • 1 sf • 4 lf',
+    );
+    expect(shapeMeasurementSummary(quickMeasure, segments), '4 lf • 1 sf');
+    expect(
+      shapeMeasurementSummary(quickMeasure.copyWith(closed: false), segments),
+      '4 lf',
+    );
+    expect(
+      mainStructureWithFoundation.foundationType,
+      StructureFoundationType.crawlspace,
     );
     expect(segments.first.measurementLabel, '1 lf');
   });

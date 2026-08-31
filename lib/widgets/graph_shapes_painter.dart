@@ -29,6 +29,9 @@ String shapeMeasurementSummary(
     (total, segment) => total + segment.lengthFeet,
   );
   if (preset.showsLinearAndAreaMeasurements) {
+    if (!shape.closed || shapeSegments.length < 3) {
+      return MeasurementFormat.linearFeet(linearFeet);
+    }
     return '${MeasurementFormat.linearFeet(linearFeet)} • '
         '${MeasurementFormat.squareFeet(squareFeet)}';
   }
@@ -128,6 +131,7 @@ class GraphShapesPainter extends CustomPainter {
       final path = _pathForShape(shape, shapeSegments);
       final bounds = path.getBounds();
       final isStyledLine = usesStyledSegmentRendering(shape);
+      final isQuickMeasure = shape.preset == GraphDrawingPreset.measurementLine;
 
       if (isStyledLine) {
         WallSegmentsPainter(
@@ -139,7 +143,7 @@ class GraphShapesPainter extends CustomPainter {
           drawMeasurements: true,
           measurementReferencePoint: shape.closed ? bounds.center : null,
         ).paint(canvas, size);
-      } else if (shape.fillColor != null) {
+      } else if (shape.fillColor != null && (!isQuickMeasure || shape.closed)) {
         canvas.drawPath(
           path,
           Paint()
@@ -147,7 +151,16 @@ class GraphShapesPainter extends CustomPainter {
         );
       }
 
-      if (!isStyledLine) {
+      if (!isStyledLine && isQuickMeasure) {
+        WallSegmentsPainter(
+          segments: shapeSegments,
+          selectedSegmentIndex: null,
+          hoveredSegmentIndex: null,
+          activeWallStart: null,
+          previewSegment: null,
+          measurementReferencePoint: bounds.center,
+        ).paint(canvas, size);
+      } else if (!isStyledLine) {
         _drawPattern(canvas, shape.pattern, path, bounds);
         _drawShapeBorder(canvas, shape, path);
         if (shape.preset?.showsLinearAndAreaMeasurements ?? false) {
@@ -166,11 +179,17 @@ class GraphShapesPainter extends CustomPainter {
 
       final measurementSummary = shapeMeasurementSummary(shape, shapeSegments);
       final shapeLabel = shape.text.trim().isEmpty ? shape.name : shape.text;
+      final foundationLabel = shape.preset == GraphDrawingPreset.mainStructure
+          ? shape.foundationType?.label
+          : null;
+      final labelLines = <String>[
+        shapeLabel,
+        if (foundationLabel != null) foundationLabel,
+        if (measurementSummary.isNotEmpty) measurementSummary,
+      ];
       _drawShapeName(
         canvas,
-        measurementSummary.isEmpty
-            ? shapeLabel
-            : '$shapeLabel\n$measurementSummary',
+        labelLines.join('\n'),
         shape.preset == GraphDrawingPreset.propertyLine
             ? _propertyLineLabelPosition(shapeSegments, bounds)
             : bounds.center,

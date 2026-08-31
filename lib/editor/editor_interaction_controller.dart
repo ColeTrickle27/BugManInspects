@@ -16,6 +16,7 @@ enum CanvasTool {
   arrow(Icons.arrow_forward, 'Arrow', 'A'),
   curve(Icons.timeline, 'Curve', 'U'),
   freehand(Icons.gesture, 'Freehand', 'F'),
+  callout(Icons.add_comment_outlined, 'Callout Box', ''),
   marker(Icons.place_outlined, 'Marker', 'M'),
   photo(Icons.add_a_photo_outlined, 'Photo', ''),
   text(Icons.note_add_outlined, '+Note', 'T');

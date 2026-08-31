@@ -159,6 +159,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   bool _spacePanActive = false;
   GraphPoint? _treatmentCalloutTip;
   Offset? _treatmentCalloutBox;
+  _CalloutKind? _activeCalloutKind;
+  final TextEditingController _inlineTextController = TextEditingController();
+  final FocusNode _inlineTextFocusNode = FocusNode();
+  int? _inlineTextAnnotationIndex;
+  GraphAnnotation? _inlineTextPreviousAnnotation;
+  bool _inlineTextIsNew = false;
   bool _initialCanvasCentered = false;
   final Set<int> _shortcutPanPointers = <int>{};
   Color _selectedMarkerColor = GraphMarkerType.mudTube.defaultColor;
@@ -197,6 +203,13 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   bool get _isTreatmentNoteTool =>
       _selectedTool == CanvasTool.marker &&
       _selectedMarkerType == GraphMarkerType.treatmentNote;
+  _CalloutKind? get _selectedCalloutKind {
+    if (_isTreatmentNoteTool) return _CalloutKind.treatment;
+    if (_selectedTool == CanvasTool.callout) return _CalloutKind.annotation;
+    return null;
+  }
+
+  bool get _isInlineTextEditing => _inlineTextAnnotationIndex != null;
   GraphDrawingPreset get _selectedStructureType => _interaction.structureType;
   GraphDrawingPreset? get _selectedDrawingPreset =>
       _selectedTool == CanvasTool.structure ? _selectedStructureType : null;
@@ -297,11 +310,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _document.dispose();
     _interaction.dispose();
     _editorFocusNode.dispose();
+    _inlineTextController.dispose();
+    _inlineTextFocusNode.dispose();
     _transformationController.dispose();
     super.dispose();
   }
 
   void _selectTool(CanvasTool tool) {
+    _finishInlineTextEditing();
     if (_selectedTool == CanvasTool.structure &&
         _interaction.drawingSession == EditorDrawingSession.plottingStructure) {
       _cancelActiveStructure();
@@ -610,6 +626,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                 : 'Curve selected: tap the curve end';
       case CanvasTool.freehand:
         return 'Freehand selected: drag to sketch';
+      case CanvasTool.callout:
+        return 'Callout Box selected: drag from the point you want to label';
       case CanvasTool.marker:
         return 'Marker selected: tap the graph';
       case CanvasTool.photo:
@@ -620,6 +638,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    if (_isInlineTextEditing) {
+      return;
+    }
     _editorFocusNode.requestFocus();
     if (event.buttons == kSecondaryMouseButton) {
       if (_removeLatestDraftPoint()) {
@@ -656,11 +677,15 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       final sceneOffset =
           _transformationController.toScene(event.localPosition);
       _interaction.pointerDown(sceneOffset);
-      if (_isTreatmentNoteTool && _isInsideCanvas(sceneOffset)) {
+      final calloutKind = _selectedCalloutKind;
+      if (calloutKind != null && _isInsideCanvas(sceneOffset)) {
         setState(() {
           _treatmentCalloutTip = GraphPoint.fromOffset(sceneOffset);
           _treatmentCalloutBox = sceneOffset;
-          _canvasStatus = 'Treatment Note: drag outward to place the callout';
+          _activeCalloutKind = calloutKind;
+          _canvasStatus = calloutKind == _CalloutKind.treatment
+              ? 'Treatment Note: drag outward to place the callout'
+              : 'Callout Box: drag outward to place the note';
         });
         return;
       }
@@ -805,6 +830,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    if (_isInlineTextEditing) {
+      return;
+    }
     if (_shortcutPanPointers.remove(event.pointer)) {
       return;
     }
@@ -822,14 +850,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     final treatmentCalloutTip = _treatmentCalloutTip;
     if (treatmentCalloutTip != null) {
+      final calloutKind = _activeCalloutKind ?? _CalloutKind.treatment;
       setState(() {
         _treatmentCalloutTip = null;
         _treatmentCalloutBox = null;
+        _activeCalloutKind = null;
       });
       if (_isInsideCanvas(sceneOffset) && _pointerTravel > _tapMovementLimit) {
-        _completeTreatmentCallout(treatmentCalloutTip, sceneOffset);
+        _completeCallout(treatmentCalloutTip, sceneOffset, calloutKind);
       } else {
-        _showCanvasMessage('Drag outward to place a Treatment Note callout');
+        _showCanvasMessage(calloutKind == _CalloutKind.treatment
+            ? 'Drag outward to place a Treatment Note callout'
+            : 'Drag outward to place a Callout Box');
       }
       if (_activePointerCount == 0) {
         _multiTouchPanning = false;
@@ -1338,6 +1370,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     if (_selectedTool == CanvasTool.text) {
       _handleTextTap(sceneOffset);
+      return;
+    }
+
+    if (_selectedTool == CanvasTool.callout) {
+      _showCanvasMessage('Drag outward to place a Callout Box');
       return;
     }
 
@@ -3362,7 +3399,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     });
   }
 
-  Future<void> _handleTextTap(Offset canvasOffset) async {
+  void _handleTextTap(Offset canvasOffset) {
     if (_isLayerLocked(_GraphLayer.inspections)) {
       _showCanvasMessage('Inspections layer is locked');
       return;
@@ -3371,27 +3408,18 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     final existingTextIndex = _findTextAnnotationIndex(canvasOffset);
 
     if (existingTextIndex != null) {
-      await _editTextAnnotation(existingTextIndex);
+      _editTextAnnotation(existingTextIndex);
       return;
     }
 
-    await _addTextAnnotation(canvasOffset);
+    _addTextAnnotation(canvasOffset);
   }
 
-  Future<void> _addTextAnnotation(Offset canvasOffset) async {
-    final text = await _showTextLabelDialog(
-      title: 'Add text label',
-      initialText: 'Note ${_textCount + 1}',
-    );
-
-    if (!mounted || text == null) {
-      return;
-    }
-
+  void _addTextAnnotation(Offset canvasOffset) {
     final annotation = GraphAnnotation(
       kind: GraphAnnotationKind.text,
       point: GraphPoint.fromOffset(canvasOffset),
-      label: text,
+      label: '',
       fontSize: _defaultTextFontSize,
       bold: _defaultTextBold,
       textColor: _defaultTextColor,
@@ -3401,36 +3429,98 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
     setState(() {
       _annotations = <GraphAnnotation>[..._annotations, annotation];
-      _undoStack.add(const _UndoEntry(_UndoKind.annotation));
-      _canvasStatus = '${annotation.label} placed';
+      _selection = _Selection.annotation(_annotations.length - 1);
+      _interaction.setSelected(_interactionReference(_selection!));
+      _canvasStatus = 'Type the note on the graph';
+    });
+    _beginInlineTextEditing(_annotations.length - 1, isNew: true);
+  }
+
+  void _editTextAnnotation(int index) {
+    if (index < 0 || index >= _annotations.length) {
+      return;
+    }
+    _beginInlineTextEditing(index);
+  }
+
+  void _beginInlineTextEditing(int index, {bool isNew = false}) {
+    if (index < 0 || index >= _annotations.length) return;
+    final annotation = _annotations[index];
+    _inlineTextController.value = TextEditingValue(
+      text: isNew ? '' : annotation.label,
+      selection: TextSelection.collapsed(
+        offset: isNew ? 0 : annotation.label.length,
+      ),
+    );
+
+    setState(() {
+      _inlineTextAnnotationIndex = index;
+      _inlineTextPreviousAnnotation = annotation;
+      _inlineTextIsNew = isNew;
+      _interaction.setTextEditing(true);
+      _canvasStatus = 'Type directly on the graph, then press Enter';
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _isInlineTextEditing) {
+        _inlineTextFocusNode.requestFocus();
+      }
     });
   }
 
-  Future<void> _editTextAnnotation(int index) async {
-    final previousAnnotation = _annotations[index];
-    final text = await _showTextLabelDialog(
-      title: 'Edit text label',
-      initialText: previousAnnotation.label,
-    );
-
-    if (!mounted || text == null || text == previousAnnotation.label) {
+  void _finishInlineTextEditing() {
+    final index = _inlineTextAnnotationIndex;
+    final previous = _inlineTextPreviousAnnotation;
+    if (index == null || previous == null || index >= _annotations.length) {
       return;
     }
 
+    final text = _inlineTextController.text.trim();
+    final isNew = _inlineTextIsNew;
     final nextAnnotations = <GraphAnnotation>[..._annotations];
-    nextAnnotations[index] = previousAnnotation.copyWith(label: text);
+    if (text.isEmpty && isNew) {
+      nextAnnotations.removeAt(index);
+      setState(() {
+        _annotations = nextAnnotations;
+        _selection = null;
+        _interaction.setSelected(null);
+        _clearInlineTextEditing();
+        _canvasStatus = 'Empty note discarded';
+      });
+      return;
+    }
 
-    setState(() {
-      _annotations = nextAnnotations;
-      _undoStack.add(
-        _UndoEntry(
-          _UndoKind.textEdit,
-          annotationIndex: index,
-          previousAnnotation: previousAnnotation,
-        ),
+    if (text.isNotEmpty && text != previous.label) {
+      nextAnnotations[index] = previous.copyWith(
+        label: text,
+        note: previous.markerType == GraphMarkerType.treatmentNote
+            ? text
+            : previous.note,
       );
-      _canvasStatus = 'Note updated';
-    });
+      setState(() {
+        _annotations = nextAnnotations;
+        _undoStack.add(
+          isNew
+              ? const _UndoEntry(_UndoKind.annotation)
+              : _UndoEntry(
+                  _UndoKind.textEdit,
+                  annotationIndex: index,
+                  previousAnnotation: previous,
+                ),
+        );
+        _clearInlineTextEditing();
+        _canvasStatus = isNew ? 'Note placed' : 'Note updated';
+      });
+      return;
+    }
+
+    setState(_clearInlineTextEditing);
+  }
+
+  void _clearInlineTextEditing() {
+    _inlineTextAnnotationIndex = null;
+    _inlineTextPreviousAnnotation = null;
+    _inlineTextIsNew = false;
+    _interaction.setTextEditing(false);
   }
 
   Future<void> _editShapeText(int index) async {
@@ -3524,6 +3614,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       case CanvasTool.wall:
       case CanvasTool.arrow:
       case CanvasTool.freehand:
+      case CanvasTool.callout:
         throw StateError('Drawing tools are not annotations.');
       case CanvasTool.marker:
         return GraphAnnotation(
@@ -3546,12 +3637,6 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         throw StateError(
             'Text annotations are created through the text dialog.');
     }
-  }
-
-  int get _textCount {
-    return _annotations
-        .where((annotation) => annotation.kind == GraphAnnotationKind.text)
-        .length;
   }
 
   int get _photoCount {
@@ -5128,26 +5213,38 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     );
   }
 
-  Future<void> _completeTreatmentCallout(
+  void _completeCallout(
     GraphPoint tip,
     Offset boxCenter,
-  ) async {
-    if (_isLayerLocked(_GraphLayer.treatment)) {
-      _showCanvasMessage('Treatment Markers layer is locked');
+    _CalloutKind kind,
+  ) {
+    final layer = kind == _CalloutKind.treatment
+        ? _GraphLayer.treatment
+        : _GraphLayer.inspections;
+    if (_isLayerLocked(layer)) {
+      _showCanvasMessage(kind == _CalloutKind.treatment
+          ? 'Treatment Markers layer is locked'
+          : 'Inspections layer is locked');
       return;
     }
+    final isTreatment = kind == _CalloutKind.treatment;
     final annotation = GraphAnnotation(
-      kind: GraphAnnotationKind.marker,
+      kind: isTreatment ? GraphAnnotationKind.marker : GraphAnnotationKind.text,
       point: GraphPoint.fromOffset(boxCenter),
-      label: 'Treatment Note',
-      note: 'Treatment Note',
-      markerType: GraphMarkerType.treatmentNote,
-      color: GraphMarkerType.treatmentNote.defaultColor,
-      size: _markerDefaultsFor(GraphMarkerType.treatmentNote).size,
-      fontSize: 16,
-      textColor: Colors.black,
-      backgroundColor: const Color(0xFF245BDB),
-      borderColor: Colors.black,
+      label: '',
+      note: '',
+      markerType:
+          isTreatment ? GraphMarkerType.treatmentNote : GraphMarkerType.damage,
+      color: isTreatment ? GraphMarkerType.treatmentNote.defaultColor : null,
+      size: isTreatment
+          ? _markerDefaultsFor(GraphMarkerType.treatmentNote).size
+          : 1,
+      fontSize: isTreatment ? 16 : _defaultTextFontSize,
+      bold: isTreatment ? true : _defaultTextBold,
+      textColor: isTreatment ? Colors.black : _defaultTextColor,
+      backgroundColor:
+          isTreatment ? const Color(0xFF245BDB) : _defaultTextBackground,
+      borderColor: isTreatment ? Colors.black : _defaultTextBorder,
       extraProperties: {
         'calloutTipX': tip.x,
         'calloutTipY': tip.y,
@@ -5158,26 +5255,14 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _annotations = [..._annotations, annotation];
       _selection = _Selection.annotation(index);
       _interaction.setSelected(_interactionReference(_selection!));
-      _undoStack.add(const _UndoEntry(_UndoKind.annotation));
-      _canvasStatus = 'Treatment Note callout placed';
+      _canvasStatus = 'Type the callout on the graph';
     });
-    await _editTreatmentCallout(index);
+    _beginInlineTextEditing(index, isNew: true);
   }
 
-  Future<void> _editTreatmentCallout(int index) async {
+  void _editTreatmentCallout(int index) {
     if (index < 0 || index >= _annotations.length) return;
-    final previous = _annotations[index];
-    final text = await _showTextLabelDialog(
-      title: 'Edit Treatment Note',
-      initialText: previous.label,
-    );
-    if (!mounted || text == null || text == previous.label) return;
-    final next = [..._annotations];
-    next[index] = previous.copyWith(label: text, note: text);
-    setState(() {
-      _annotations = next;
-      _canvasStatus = 'Treatment Note updated';
-    });
+    _beginInlineTextEditing(index);
   }
 
   Future<Map<String, Uint8List>> _collectPortalBlobs() async {
@@ -6287,6 +6372,33 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     });
   }
 
+  void _updateShapeFoundationType(
+    int index,
+    StructureFoundationType foundationType,
+  ) {
+    if (index < 0 || index >= _shapes.length) {
+      return;
+    }
+    if (_isLayerLocked(_GraphLayer.shapes)) {
+      _showCanvasMessage('Shapes layer is locked');
+      return;
+    }
+
+    _recordSnapshotUndo();
+    final nextShapes = <GraphShape>[..._shapes];
+    final nextProperties = <String, Object?>{
+      ...nextShapes[index].extraProperties,
+      'foundationType': foundationType.name,
+    };
+    nextShapes[index] = nextShapes[index].copyWith(
+      extraProperties: nextProperties,
+    );
+    setState(() {
+      _shapes = nextShapes;
+      _canvasStatus = 'Main Structure foundation updated';
+    });
+  }
+
   void _recordSnapshotUndo() {
     if (_applyingHistory) {
       return;
@@ -6339,12 +6451,86 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       CanvasTool.arrow ||
       CanvasTool.curve ||
       CanvasTool.freehand ||
+      CanvasTool.callout ||
       CanvasTool.marker ||
       CanvasTool.photo =>
         SystemMouseCursors.precise,
       CanvasTool.text => SystemMouseCursors.text,
       CanvasTool.select => SystemMouseCursors.basic,
     };
+  }
+
+  Widget? _buildInlineTextEditor() {
+    final index = _inlineTextAnnotationIndex;
+    if (index == null || index < 0 || index >= _annotations.length) {
+      return null;
+    }
+
+    final annotation = _annotations[index];
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: _inlineTextController.text.isEmpty
+            ? 'Type note'
+            : _inlineTextController.text,
+        style: TextStyle(
+          fontSize: annotation.fontSize,
+          fontWeight: annotation.bold ? FontWeight.w800 : FontWeight.w500,
+          fontStyle: annotation.italic ? FontStyle.italic : FontStyle.normal,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 260);
+    final width =
+        math.max(132.0, math.min(280.0, textPainter.width + 32)).toDouble();
+    final left = (annotation.point.x - (width / 2))
+        .clamp(8.0, _canvasSize.width - width - 8)
+        .toDouble();
+    final top = (annotation.point.y - 28)
+        .clamp(8.0, _canvasSize.height - 56)
+        .toDouble();
+
+    return Positioned(
+      left: left,
+      top: top,
+      width: width,
+      child: Material(
+        color: Colors.transparent,
+        child: TextField(
+          key: const ValueKey('inline-canvas-text-editor'),
+          controller: _inlineTextController,
+          focusNode: _inlineTextFocusNode,
+          autofocus: true,
+          maxLines: null,
+          minLines: 1,
+          textAlign: TextAlign.center,
+          textInputAction: TextInputAction.done,
+          style: TextStyle(
+            color: annotation.textColor,
+            fontSize: annotation.fontSize,
+            fontWeight: annotation.bold ? FontWeight.w800 : FontWeight.w500,
+            fontStyle: annotation.italic ? FontStyle.italic : FontStyle.normal,
+          ),
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'Type note',
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            filled: true,
+            fillColor: annotation.backgroundColor,
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(7),
+              borderSide: BorderSide(color: annotation.borderColor, width: 2),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(7),
+              borderSide: BorderSide(color: annotation.borderColor, width: 2),
+            ),
+          ),
+          onChanged: (_) => setState(() {}),
+          onSubmitted: (_) => _finishInlineTextEditing(),
+        ),
+      ),
+    );
   }
 
   Future<void> _showAboutDialog() async {
@@ -6475,6 +6661,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                                     previewSegment: _previewSegment,
                                     treatmentCalloutTip: _treatmentCalloutTip,
                                     treatmentCalloutBox: _treatmentCalloutBox,
+                                    activeCalloutKind: _activeCalloutKind,
+                                    inlineTextEditor: _buildInlineTextEditor(),
                                     structureVisible:
                                         _isLayerVisible(_GraphLayer.structure),
                                     shapesVisible: _isLayerVisible(
@@ -6696,6 +6884,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onShapeBorderColorChanged: _updateShapeBorderColor,
                           onShapeBorderWidthChanged: _updateShapeBorderWidth,
                           onShapePatternChanged: _updateShapePattern,
+                          onShapeFoundationTypeChanged:
+                              _updateShapeFoundationType,
                           onSetShapeDefault: _setShapeDefault,
                           onTraceLabelChanged: _updateTraceLabel,
                           onEditTrace: (index) =>
@@ -6763,6 +6953,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                 previewSegment: null,
                 treatmentCalloutTip: null,
                 treatmentCalloutBox: null,
+                activeCalloutKind: null,
                 structureVisible: true,
                 shapesVisible: true,
                 inspectionsVisible: true,
@@ -7126,6 +7317,7 @@ class _PropertiesSidebar extends StatelessWidget {
     required this.onShapeBorderColorChanged,
     required this.onShapeBorderWidthChanged,
     required this.onShapePatternChanged,
+    required this.onShapeFoundationTypeChanged,
     required this.onSetShapeDefault,
     required this.onTraceLabelChanged,
     required this.onEditTrace,
@@ -7176,6 +7368,8 @@ class _PropertiesSidebar extends StatelessWidget {
   final void Function(int index, double borderWidth) onShapeBorderWidthChanged;
   final void Function(int index, GraphShapePattern pattern)
       onShapePatternChanged;
+  final void Function(int index, StructureFoundationType foundationType)
+      onShapeFoundationTypeChanged;
   final ValueChanged<int> onSetShapeDefault;
   final void Function(int index, String label) onTraceLabelChanged;
   final ValueChanged<int> onEditTrace;
@@ -7666,6 +7860,30 @@ class _PropertiesSidebar extends StatelessWidget {
             value: shape.preset?.label ?? 'Custom',
           ),
           const SizedBox(height: 10),
+          if (shape.preset == GraphDrawingPreset.mainStructure) ...[
+            DropdownButtonFormField<StructureFoundationType>(
+              initialValue: shape.foundationType,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Foundation'),
+              hint: const Text('Select foundation'),
+              items: StructureFoundationType.values
+                  .map(
+                    (type) => DropdownMenuItem(
+                      value: type,
+                      child: Text(type.label),
+                    ),
+                  )
+                  .toList(),
+              onChanged: shapeLocked
+                  ? null
+                  : (type) {
+                      if (type != null) {
+                        onShapeFoundationTypeChanged(index, type);
+                      }
+                    },
+            ),
+            const SizedBox(height: 10),
+          ],
           TextFormField(
             key: ValueKey('shape-$index'),
             initialValue: shape.name,
@@ -8381,6 +8599,8 @@ class _CanvasSurface extends StatelessWidget {
     required this.previewSegment,
     required this.treatmentCalloutTip,
     required this.treatmentCalloutBox,
+    required this.activeCalloutKind,
+    this.inlineTextEditor,
     required this.structureVisible,
     required this.shapesVisible,
     required this.inspectionsVisible,
@@ -8414,6 +8634,8 @@ class _CanvasSurface extends StatelessWidget {
   final WallSegment? previewSegment;
   final GraphPoint? treatmentCalloutTip;
   final Offset? treatmentCalloutBox;
+  final _CalloutKind? activeCalloutKind;
+  final Widget? inlineTextEditor;
   final bool structureVisible;
   final bool shapesVisible;
   final bool inspectionsVisible;
@@ -8423,47 +8645,58 @@ class _CanvasSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      key: const ValueKey('graph-canvas-paint'),
-      size: canvasSize,
-      painter: GraphGridPainter(visible: gridVisible),
-      foregroundPainter: _GraphOverlayPainter(
-        wallSegments: wallSegments,
-        annotations: annotations,
-        shapes: shapes,
-        freehandStrokes: freehandStrokes,
-        draftFreehandPoints: draftFreehandPoints,
-        previewShapeSegments: previewShapeSegments,
-        previewShape: previewShape,
-        hiddenSegmentIndexes: hiddenSegmentIndexes,
-        selectedSegmentIndex: selectedSegmentIndex,
-        selectedAnnotationIndex: selectedAnnotationIndex,
-        selectedShapeIndex: selectedShapeIndex,
-        selectedFreehandIndex: selectedFreehandIndex,
-        hoveredSegmentIndex: hoveredSegmentIndex,
-        hoveredAnnotationIndex: hoveredAnnotationIndex,
-        hoveredShapeIndex: hoveredShapeIndex,
-        hoveredFreehandIndex: hoveredFreehandIndex,
-        activeWallStart: activeWallStart,
-        previewSegment: previewSegment,
-        treatmentCalloutTip: treatmentCalloutTip,
-        treatmentCalloutBox: treatmentCalloutBox,
-        structureVisible: structureVisible,
-        shapesVisible: shapesVisible,
-        inspectionsVisible: inspectionsVisible,
-        treatmentVisible: treatmentVisible,
-        photosVisible: photosVisible,
-      ),
-      child: SizedBox(
-        width: canvasSize.width,
-        height: canvasSize.height,
-        child: traceLayerVisible
-            ? _TraceLayer(
-                traces: traces,
-                selectedTraceIndex: selectedTraceIndex,
-                hoveredTraceIndex: hoveredTraceIndex,
-              )
-            : null,
+    return SizedBox(
+      width: canvasSize.width,
+      height: canvasSize.height,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          CustomPaint(
+            key: const ValueKey('graph-canvas-paint'),
+            size: canvasSize,
+            painter: GraphGridPainter(visible: gridVisible),
+            foregroundPainter: _GraphOverlayPainter(
+              wallSegments: wallSegments,
+              annotations: annotations,
+              shapes: shapes,
+              freehandStrokes: freehandStrokes,
+              draftFreehandPoints: draftFreehandPoints,
+              previewShapeSegments: previewShapeSegments,
+              previewShape: previewShape,
+              hiddenSegmentIndexes: hiddenSegmentIndexes,
+              selectedSegmentIndex: selectedSegmentIndex,
+              selectedAnnotationIndex: selectedAnnotationIndex,
+              selectedShapeIndex: selectedShapeIndex,
+              selectedFreehandIndex: selectedFreehandIndex,
+              hoveredSegmentIndex: hoveredSegmentIndex,
+              hoveredAnnotationIndex: hoveredAnnotationIndex,
+              hoveredShapeIndex: hoveredShapeIndex,
+              hoveredFreehandIndex: hoveredFreehandIndex,
+              activeWallStart: activeWallStart,
+              previewSegment: previewSegment,
+              treatmentCalloutTip: treatmentCalloutTip,
+              treatmentCalloutBox: treatmentCalloutBox,
+              activeCalloutKind: activeCalloutKind,
+              structureVisible: structureVisible,
+              shapesVisible: shapesVisible,
+              inspectionsVisible: inspectionsVisible,
+              treatmentVisible: treatmentVisible,
+              photosVisible: photosVisible,
+            ),
+            child: SizedBox(
+              width: canvasSize.width,
+              height: canvasSize.height,
+              child: traceLayerVisible
+                  ? _TraceLayer(
+                      traces: traces,
+                      selectedTraceIndex: selectedTraceIndex,
+                      hoveredTraceIndex: hoveredTraceIndex,
+                    )
+                  : null,
+            ),
+          ),
+          if (inlineTextEditor != null) inlineTextEditor!,
+        ],
       ),
     );
   }
@@ -8491,6 +8724,7 @@ class _GraphOverlayPainter extends CustomPainter {
     required this.previewSegment,
     required this.treatmentCalloutTip,
     required this.treatmentCalloutBox,
+    required this.activeCalloutKind,
     required this.structureVisible,
     required this.shapesVisible,
     required this.inspectionsVisible,
@@ -8518,6 +8752,7 @@ class _GraphOverlayPainter extends CustomPainter {
   final WallSegment? previewSegment;
   final GraphPoint? treatmentCalloutTip;
   final Offset? treatmentCalloutBox;
+  final _CalloutKind? activeCalloutKind;
   final bool structureVisible;
   final bool shapesVisible;
   final bool inspectionsVisible;
@@ -8564,22 +8799,37 @@ class _GraphOverlayPainter extends CustomPainter {
         hoveredStrokeIndex: hoveredFreehandIndex,
       ).paint(canvas, size);
     }
-    final previewAnnotations =
-        treatmentCalloutTip == null || treatmentCalloutBox == null
-            ? annotations
-            : [
-                ...annotations,
-                GraphAnnotation(
-                  kind: GraphAnnotationKind.marker,
-                  point: GraphPoint.fromOffset(treatmentCalloutBox!),
-                  label: 'Treatment Note',
-                  markerType: GraphMarkerType.treatmentNote,
-                  extraProperties: {
-                    'calloutTipX': treatmentCalloutTip!.x,
-                    'calloutTipY': treatmentCalloutTip!.y,
-                  },
-                ),
-              ];
+    final calloutKind = activeCalloutKind;
+    final previewAnnotations = treatmentCalloutTip == null ||
+            treatmentCalloutBox == null ||
+            calloutKind == null
+        ? annotations
+        : [
+            ...annotations,
+            GraphAnnotation(
+              kind: calloutKind == _CalloutKind.treatment
+                  ? GraphAnnotationKind.marker
+                  : GraphAnnotationKind.text,
+              point: GraphPoint.fromOffset(treatmentCalloutBox!),
+              label: calloutKind == _CalloutKind.treatment
+                  ? 'Treatment Note'
+                  : 'Callout Box',
+              markerType: calloutKind == _CalloutKind.treatment
+                  ? GraphMarkerType.treatmentNote
+                  : GraphMarkerType.damage,
+              textColor: calloutKind == _CalloutKind.treatment
+                  ? Colors.black
+                  : const Color(0xFFCC2000),
+              backgroundColor: calloutKind == _CalloutKind.treatment
+                  ? const Color(0xFF245BDB)
+                  : const Color(0xFFFFEB00),
+              borderColor: Colors.black,
+              extraProperties: {
+                'calloutTipX': treatmentCalloutTip!.x,
+                'calloutTipY': treatmentCalloutTip!.y,
+              },
+            ),
+          ];
     GraphAnnotationsPainter(
       annotations: previewAnnotations,
       selectedAnnotationIndex: selectedAnnotationIndex,
@@ -8613,6 +8863,7 @@ class _GraphOverlayPainter extends CustomPainter {
         oldDelegate.previewSegment != previewSegment ||
         oldDelegate.treatmentCalloutTip != treatmentCalloutTip ||
         oldDelegate.treatmentCalloutBox != treatmentCalloutBox ||
+        oldDelegate.activeCalloutKind != activeCalloutKind ||
         oldDelegate.structureVisible != structureVisible ||
         oldDelegate.shapesVisible != shapesVisible ||
         oldDelegate.inspectionsVisible != inspectionsVisible ||
@@ -8955,6 +9206,8 @@ class _UndoEntry {
 enum _CanvasMessageSeverity { info, success, warning, error }
 
 enum _SidePanelMode { properties, layers }
+
+enum _CalloutKind { annotation, treatment }
 
 enum _PhotoSource { files, camera }
 

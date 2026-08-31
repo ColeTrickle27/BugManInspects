@@ -33,16 +33,21 @@ class GraphAnnotationsPainter extends CustomPainter {
         continue;
       }
 
-      switch (annotation.kind) {
-        case GraphAnnotationKind.marker:
-          _drawMarker(canvas, annotation, size);
-          break;
-        case GraphAnnotationKind.photo:
-          _drawPhotoPin(canvas, annotation);
-          break;
-        case GraphAnnotationKind.text:
-          _drawTextLabel(canvas, annotation);
-          break;
+      final calloutTip = _calloutTip(annotation);
+      if (calloutTip != null) {
+        _drawTreatmentCallout(canvas, annotation, calloutTip, size);
+      } else {
+        switch (annotation.kind) {
+          case GraphAnnotationKind.marker:
+            _drawMarker(canvas, annotation, size);
+            break;
+          case GraphAnnotationKind.photo:
+            _drawPhotoPin(canvas, annotation);
+            break;
+          case GraphAnnotationKind.text:
+            _drawTextLabel(canvas, annotation);
+            break;
+        }
       }
 
       if (i == selectedAnnotationIndex) {
@@ -102,16 +107,6 @@ class GraphAnnotationsPainter extends CustomPainter {
   }
 
   void _drawMarker(Canvas canvas, GraphAnnotation annotation, Size canvasSize) {
-    if (annotation.markerType == GraphMarkerType.treatmentNote &&
-        _calloutTip(annotation) != null) {
-      _drawTreatmentCallout(
-        canvas,
-        annotation,
-        _calloutTip(annotation)!,
-        canvasSize,
-      );
-      return;
-    }
     final center = annotation.point.offset;
     final color = annotation.color ?? annotation.markerType.defaultColor;
     final iconSize = 34 * annotation.size;
@@ -209,7 +204,8 @@ class GraphAnnotationsPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
       textAlign: TextAlign.center,
     )..layout(maxWidth: 210);
-    final width = math.max(128.0, textPainter.width + 30);    final height = math.max(48.0, textPainter.height + 22);
+    final width = math.max(128.0, textPainter.width + 30);
+    final height = math.max(48.0, textPainter.height + 22);
     final center = Offset(
       requestedCenter.dx
           .clamp(width / 2, canvasSize.width - (width / 2))

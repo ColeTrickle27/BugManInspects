@@ -87,22 +87,20 @@ class CanvasToolbarAction {
 }
 
 const basicLineToolbarActions = <CanvasToolbarAction>[
-  CanvasToolbarAction.tool(CanvasTool.wall),
+  CanvasToolbarAction.tool(CanvasTool.callout),
+  CanvasToolbarAction.tool(CanvasTool.text),
   CanvasToolbarAction.tool(CanvasTool.arrow),
-  CanvasToolbarAction.tool(CanvasTool.curve),
   CanvasToolbarAction.tool(CanvasTool.freehand),
 ];
 
 const basicShapeToolbarActions = <CanvasToolbarAction>[
   CanvasToolbarAction.tool(CanvasTool.rectangle),
   CanvasToolbarAction.tool(CanvasTool.circle),
-  CanvasToolbarAction.tool(CanvasTool.ellipse),
   CanvasToolbarAction.tool(CanvasTool.triangle),
 ];
 
 const buildingFeatureToolbarActions = <CanvasToolbarAction>[
   CanvasToolbarAction.preset(GraphDrawingPreset.slab),
-  CanvasToolbarAction.preset(GraphDrawingPreset.crawlspace),
   CanvasToolbarAction.preset(GraphDrawingPreset.woodDeck),
   CanvasToolbarAction.preset(GraphDrawingPreset.openPorch),
   CanvasToolbarAction.preset(GraphDrawingPreset.dirtFilledPorch),
@@ -135,7 +133,6 @@ List<GraphMarkerType> get availableTreatmentMarkers => treatmentMarkerTypes;
 List<GraphDrawingPreset> get structureToolbarPresets => [
       GraphDrawingPreset.mainStructure,
       ...buildingFeatureToolbarActions.map((action) => action.preset!),
-      ...propertyToolbarActions.map((action) => action.preset!),
     ];
 
 @visibleForTesting
@@ -178,7 +175,7 @@ class CanvasToolbar extends StatefulWidget {
 }
 
 class _CanvasToolbarState extends State<CanvasToolbar> {
-  String? _expandedSection = 'Draw';
+  String? _expandedSection = 'Annotate';
 
   void _activate(CanvasToolbarAction action) {
     switch (action.kind) {
@@ -238,27 +235,38 @@ class _CanvasToolbarState extends State<CanvasToolbar> {
               children: [
                 _ToolbarHeader(onCollapse: widget.onCollapse),
                 const SizedBox(height: 4),
-                _section(
-                  label: 'Draw',
-                  icon: Icons.draw_outlined,
-                  children: [
-                    _ActionButton(
-                      action: const CanvasToolbarAction.preset(
-                        GraphDrawingPreset.measurementLine,
-                      ),
+                KeyedSubtree(
+                  key: const ValueKey('quick-measure-tool'),
+                  child: _ActionFace(
+                    action: const CanvasToolbarAction.preset(
+                      GraphDrawingPreset.measurementLine,
+                    ),
+                    selected: const CanvasToolbarAction.preset(
+                      GraphDrawingPreset.measurementLine,
+                    ).isSelected(
                       selectedTool: widget.selectedTool,
                       selectedPreset: widget.selectedDrawingPreset,
                       selectedMarker: widget.selectedMarkerType,
-                      onPressed: _activate,
-                      onDoubleTap: () => widget.onActionDoubleTapped(
-                        const CanvasToolbarAction.preset(
-                          GraphDrawingPreset.measurementLine,
-                        ),
+                    ),
+                    onPressed: () => _activate(
+                      const CanvasToolbarAction.preset(
+                        GraphDrawingPreset.measurementLine,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    onDoubleTap: () => widget.onActionDoubleTapped(
+                      const CanvasToolbarAction.preset(
+                        GraphDrawingPreset.measurementLine,
+                      ),
+                    ),
+                  ),
+                ),
+                const Divider(height: 18),
+                _section(
+                  label: 'Annotate',
+                  icon: Icons.edit_note_outlined,
+                  children: [
                     _ActionPicker(
-                      groupLabel: 'Lines',
+                      groupLabel: 'Callouts & Sketch',
                       displayedAction:
                           _displayedAction(basicLineToolbarActions),
                       actions: basicLineToolbarActions,
@@ -281,7 +289,7 @@ class _CanvasToolbarState extends State<CanvasToolbar> {
                   ],
                 ),
                 _section(
-                  label: 'Build',
+                  label: 'Sketch Structure',
                   icon: Icons.home_work_outlined,
                   children: [
                     _ActionButton(
@@ -311,16 +319,6 @@ class _CanvasToolbarState extends State<CanvasToolbar> {
                     ),
                     const SizedBox(height: 6),
                     _ActionPicker(
-                      groupLabel: 'Property',
-                      displayedAction: _displayedAction(propertyToolbarActions),
-                      actions: propertyToolbarActions,
-                      selectedTool: widget.selectedTool,
-                      selectedPreset: widget.selectedDrawingPreset,
-                      selectedMarker: widget.selectedMarkerType,
-                      onSelected: _activate,
-                    ),
-                    const SizedBox(height: 6),
-                    _ActionPicker(
                       groupLabel: 'Utility',
                       displayedAction: _displayedAction(utilityToolbarActions),
                       actions: utilityToolbarActions,
@@ -332,7 +330,7 @@ class _CanvasToolbarState extends State<CanvasToolbar> {
                   ],
                 ),
                 _section(
-                  label: 'Inspect',
+                  label: 'Inspection Findings',
                   icon: Icons.search_outlined,
                   children: [
                     for (final marker in const [
@@ -352,8 +350,7 @@ class _CanvasToolbarState extends State<CanvasToolbar> {
                       const SizedBox(height: 6),
                     ],
                     for (final action in const [
-                      CanvasToolbarAction.tool(CanvasTool.text),
-                      CanvasToolbarAction.tool(CanvasTool.photo),
+                      CanvasToolbarAction.tool(CanvasTool.photo)
                     ]) ...[
                       _ActionButton(
                         action: action,
@@ -379,7 +376,7 @@ class _CanvasToolbarState extends State<CanvasToolbar> {
                   ],
                 ),
                 _section(
-                  label: 'Treat',
+                  label: 'Treatment Details',
                   icon: Icons.medical_services_outlined,
                   children: [
                     _ActionButton(

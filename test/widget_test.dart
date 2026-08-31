@@ -8,6 +8,7 @@ import 'package:bugman_graphs/models/graph_document.dart';
 import 'package:bugman_graphs/models/graph_point.dart';
 import 'package:bugman_graphs/models/job.dart';
 import 'package:bugman_graphs/models/trace_geometry.dart';
+import 'package:bugman_graphs/models/wall_segment.dart';
 import 'package:bugman_graphs/screens/graph_canvas_screen.dart';
 import 'package:bugman_graphs/screens/home_screen.dart';
 import 'package:bugman_graphs/screens/new_job_screen.dart';
@@ -16,6 +17,7 @@ import 'package:bugman_graphs/services/bugman_portal_service.dart';
 import 'package:bugman_graphs/services/graph_repository_stub.dart';
 import 'package:bugman_graphs/theme/app_theme.dart';
 import 'package:bugman_graphs/widgets/canvas_toolbar.dart';
+import 'package:bugman_graphs/widgets/graph_shapes_painter.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -431,7 +433,7 @@ void main() {
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
-    await _selectStructure(tester, 'Crawlspace');
+    await _selectStructure(tester, 'Concrete Slab');
 
     await tester.tapAt(const Offset(280, 240));
     await tester.tapAt(const Offset(500, 240));
@@ -443,14 +445,18 @@ void main() {
     expect(_shapeCount(tester), 1);
   });
 
-  testWidgets('property line closes and shows acreage summary on canvas',
+  testWidgets(
+      'Quick Measure closes into a filled area with linear and square-foot measurements',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
 
-    await _selectPropertyTool(tester, 'Property Line (acres)');
+    await _selectQuickMeasure(tester);
+    final toolbar = tester.widget<CanvasToolbar>(find.byType(CanvasToolbar));
+    expect(toolbar.selectedTool, CanvasTool.structure);
+    expect(toolbar.selectedDrawingPreset, GraphDrawingPreset.measurementLine);
     await tester.tapAt(const Offset(300, 250));
     await tester.tapAt(const Offset(500, 250));
     await tester.tapAt(const Offset(500, 450));
@@ -458,31 +464,18 @@ void main() {
     await tester.pump();
 
     expect(_shapeCount(tester), 1);
-    final summaryCard = find.byKey(
-      const ValueKey('property-line-measurement-summary'),
-    );
-    expect(summaryCard, findsOneWidget);
+    final painter = _graphOverlayPainter(tester);
+    final shapes = (painter.shapes as List).cast<GraphShape>();
+    final wallSegments = (painter.wallSegments as List).cast<WallSegment>();
+    expect(shapes.single.preset, GraphDrawingPreset.measurementLine);
+    expect(shapes.single.closed, isTrue);
+    final shapeSegments = shapes.single.segmentIndexes
+        .map((index) => wallSegments[index])
+        .toList();
     expect(
-      find.descendant(
-        of: summaryCard,
-        matching: find.text('Property Line (acres)'),
-      ),
-      findsOneWidget,
-    );
+        shapeMeasurementSummary(shapes.single, shapeSegments), contains(' sf'));
     expect(
-      find.descendant(
-        of: summaryCard,
-        matching: find.textContaining(' sf • '),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: summaryCard,
-        matching: find.textContaining(' lf'),
-      ),
-      findsOneWidget,
-    );
+        shapeMeasurementSummary(shapes.single, shapeSegments), contains(' lf'));
   });
 
   testWidgets('generic shapes require drag and double-click opens properties',
@@ -1157,16 +1150,15 @@ void main() {
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
 
-    final quickMeasure = find.byTooltip(
-      'Quick Measure\nHold and drag to customize quick tools',
+    final calloutBox = find.byTooltip(
+      'Callouts & Sketch: Callout Box',
     );
     final quickToolbar = find.byKey(const ValueKey('canvas-quick-toolbar'));
-    await _expandToolbarSection(tester, 'Draw', quickMeasure);
-    expect(quickMeasure, findsOneWidget);
+    expect(calloutBox, findsOneWidget);
     expect(quickToolbar, findsOneWidget);
 
     final gesture = await tester.startGesture(
-      tester.getCenter(quickMeasure),
+      tester.getCenter(calloutBox),
       kind: PointerDeviceKind.mouse,
     );
     await tester.pump(const Duration(milliseconds: 400));
@@ -1181,9 +1173,7 @@ void main() {
     expect(
       toolbar.actions,
       contains(
-        const CanvasToolbarAction.preset(
-          GraphDrawingPreset.measurementLine,
-        ),
+        const CanvasToolbarAction.tool(CanvasTool.callout),
       ),
     );
   });
@@ -1232,7 +1222,7 @@ void main() {
     );
     await _expandToolbarSection(
       tester,
-      'Inspect',
+      'Inspection Findings',
       moistureTool,
     );
     await tester.ensureVisible(moistureTool);
@@ -1292,7 +1282,7 @@ void main() {
     );
     await _expandToolbarSection(
       tester,
-      'Inspect',
+      'Inspection Findings',
       photoTool,
     );
     await tester.ensureVisible(photoTool);
@@ -1391,10 +1381,10 @@ void main() {
 
       expect(matrix.entry(0, 3), closeTo((viewport.width - 3600) / 2, 0.1));
       expect(matrix.entry(1, 3), closeTo((viewport.height - 2600) / 2, 0.1));
-      expect(find.text('Draw'), findsOneWidget);
-      expect(find.text('Build'), findsOneWidget);
-      expect(find.text('Inspect'), findsOneWidget);
-      expect(find.text('Treat'), findsOneWidget);
+      expect(find.text('Annotate'), findsOneWidget);
+      expect(find.text('Sketch Structure'), findsOneWidget);
+      expect(find.text('Inspection Findings'), findsOneWidget);
+      expect(find.text('Treatment Details'), findsOneWidget);
       expect(find.byType(CanvasQuickToolbar), findsOneWidget);
       expect(find.byTooltip('Select (V)'), findsOneWidget);
       expect(find.byTooltip('Pan (H)'), findsOneWidget);
@@ -1551,7 +1541,7 @@ void main() {
     addTearDown(tester.view.reset);
     await _pumpEditor(tester);
     final picker = find.byTooltip('Treatment Marker: Treatment Area');
-    await _expandToolbarSection(tester, 'Treat', picker);
+    await _expandToolbarSection(tester, 'Treatment Details', picker);
     await tester.ensureVisible(picker);
     await tester.pumpAndSettle();
     await tester.tap(picker);
@@ -1578,7 +1568,7 @@ void main() {
     await _pumpEditor(tester);
 
     final treatmentNote = find.byTooltip('Treatment Note');
-    await _expandToolbarSection(tester, 'Treat', treatmentNote);
+    await _expandToolbarSection(tester, 'Treatment Details', treatmentNote);
     await tester.tap(treatmentNote);
     await tester.pumpAndSettle();
 
@@ -1587,9 +1577,13 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit Treatment Note'), findsOneWidget);
-    await tester.enterText(find.byType(TextField), 'Treat foundation wall');
-    await tester.tap(find.text('Save'));
+    expect(find.byKey(const ValueKey('inline-canvas-text-editor')),
+        findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('inline-canvas-text-editor')),
+      'Treat foundation wall',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
 
     expect(_annotationCount(tester), 1);
@@ -1597,6 +1591,38 @@ void main() {
       (_graphOverlayPainter(tester).annotations as List).single.label,
       'Treat foundation wall',
     );
+  });
+
+  testWidgets('Callout Box places an editable inspection note on the graph',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    await _pumpEditor(tester);
+
+    final picker = find.byTooltip('Callouts & Sketch: Callout Box');
+    await tester.tap(picker);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Callout Box').last);
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(const Offset(320, 260));
+    await gesture.moveTo(const Offset(470, 340));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final editor = find.byKey(const ValueKey('inline-canvas-text-editor'));
+    expect(editor, findsOneWidget);
+    await tester.enterText(editor, 'Inspect rim joist');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
+    final annotations = (_graphOverlayPainter(tester).annotations as List)
+        .cast<GraphAnnotation>();
+    expect(annotations, hasLength(1));
+    expect(annotations.single.kind, GraphAnnotationKind.text);
+    expect(annotations.single.label, 'Inspect rim joist');
+    expect(annotations.single.extraProperties, contains('calloutTipX'));
   });
 
   testWidgets('right-click removes only the latest unfinished line point',
@@ -1719,7 +1745,7 @@ Future<void> _secondaryClick(WidgetTester tester, Offset position) async {
 }
 
 Future<void> _selectStructure(WidgetTester tester, String label) async {
-  await _expandToolbarSection(tester, 'Build', find.text('MAIN'));
+  await _expandToolbarSection(tester, 'Sketch Structure', find.text('MAIN'));
   if (label == 'Main Structure') {
     await tester.ensureVisible(find.text('MAIN'));
     await tester.pumpAndSettle();
@@ -1737,7 +1763,7 @@ Future<void> _selectStructure(WidgetTester tester, String label) async {
 }
 
 Future<void> _selectBasicShape(WidgetTester tester, String label) async {
-  await _expandToolbarSection(tester, 'Draw', find.text('Basic Shapes'));
+  await _expandToolbarSection(tester, 'Annotate', find.text('Basic Shapes'));
   await tester.ensureVisible(find.text('Basic Shapes'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Basic Shapes'));
@@ -1746,23 +1772,20 @@ Future<void> _selectBasicShape(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> _selectPropertyTool(WidgetTester tester, String label) async {
-  await _expandToolbarSection(tester, 'Build', find.text('Property'));
-  await tester.ensureVisible(find.text('Property'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Property'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text(label));
+Future<void> _selectLineTool(WidgetTester tester, String label) async {
+  expect(label, 'Line');
+  await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
   await tester.pumpAndSettle();
 }
 
-Future<void> _selectLineTool(WidgetTester tester, String label) async {
-  await _expandToolbarSection(tester, 'Draw', find.text('Lines'));
-  await tester.ensureVisible(find.text('Lines'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Lines'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text(label));
+Future<void> _selectQuickMeasure(WidgetTester tester) async {
+  final quickMeasure = find.byKey(const ValueKey('quick-measure-tool'));
+  await tester.ensureVisible(quickMeasure);
+  final action = tester.widget<InkWell>(find.descendant(
+    of: quickMeasure,
+    matching: find.byType(InkWell),
+  ));
+  action.onTap!();
   await tester.pumpAndSettle();
 }
 
