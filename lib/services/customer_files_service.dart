@@ -1,19 +1,16 @@
 import '../models/customer_file.dart';
 
-/// Customer Files service boundary.
+/// Read-only customer lookup boundary.
 ///
 /// Ops Brain (ColeTrickle27/holloman-ops-brain) is the single system of
 /// record that mirrors PestPac's Bill-To / Location structure. BugMan
 /// Graphs never owns or invents customer records -- it only searches and
-/// reads real Customer File records through Ops Brain's authenticated
-/// session and existing `/api/search`, `/api/accounts`, and `/api/location`
-/// routes. This mirrors ColeTrickle27/BugMan-Sales-Brain's
-/// `CustomerFilesService` interface so both apps resolve the same customer
-/// identity the same way.
+/// reads through Ops Brain's authenticated session. Search and pair resolution
+/// use `/api/customer-identity/search`, selecting complete permanent identities
+/// like SalesBrain. The legacy accounts method remains for file listings.
 ///
-/// If a Bill-To/Location isn't found here, the caller must fall back to
-/// manual entry of the exact PestPac identifiers the technician already
-/// knows -- never auto-generate or guess a Bill-To or Location number.
+/// A new-customer graph can be an unassigned draft. Never generate, guess or
+/// manually register customer identifiers from Graphs.
 abstract class CustomerFilesService {
   /// Whether this service can actually reach Ops Brain from the current
   /// context (e.g. false on non-web platforms, or when the app isn't
@@ -28,9 +25,8 @@ abstract class CustomerFilesService {
   Future<List<CustomerLocation>> getLocations(String billToNumber);
 
   /// A single Bill-To/Location pair, if it already exists in Ops Brain.
-  /// Returns null (never throws) when the pair cannot be resolved, so
-  /// callers can safely treat "not found" as "fall back to manual entry"
-  /// without needing to guess an identifier themselves.
+  /// Returns null when no matching permanent identity can be resolved.
+  /// Authentication and connection errors remain distinct failures.
   Future<CustomerLocation?> getLocation(
     String billToNumber,
     String locationNumber,

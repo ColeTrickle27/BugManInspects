@@ -98,7 +98,7 @@ void main() {
   testWidgets('New Job shows optional metadata fields and approved services',
       (tester) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(900, 1200);
+    tester.view.physicalSize = const Size(900, 2400);
     addTearDown(tester.view.reset);
     await tester.pumpWidget(const BugManGraphsApp());
 
@@ -110,11 +110,19 @@ void main() {
         .map((field) => field.decoration?.labelText)
         .toList();
     expect(fields, [
-      'Date',
+      'Company',
+      'First Name',
+      'Last Name',
+      'Street Address',
+      'City',
+      'State',
+      'Zip',
+      'Phone',
+      'Email',
+      'Name',
+      'Phone Number',
       'Location Name',
-      'Location Address',
-      'PestPac Location #',
-      'PestPac Bill-To #',
+      'Date',
       'Created By',
     ]);
 
@@ -129,7 +137,7 @@ void main() {
     expect(dateField.readOnly, isTrue);
 
     final serviceType = tester.widget<DropdownButtonFormField<String>>(
-      find.byType(DropdownButtonFormField<String>),
+      find.widgetWithText(DropdownButtonFormField<String>, 'Service Type'),
     );
     expect(NewJobScreen.serviceTypes,
         ['Inspection', 'WDIR', 'ATBS Installation', 'General Use']);
@@ -151,7 +159,7 @@ void main() {
   testWidgets('blank New Job submission opens an Untitled Job graph',
       (tester) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(900, 1200);
+    tester.view.physicalSize = const Size(900, 2400);
     addTearDown(tester.view.reset);
     await tester.pumpWidget(const BugManGraphsApp());
 
@@ -173,26 +181,18 @@ void main() {
 
   testWidgets('job card labels both populated PestPac identifiers',
       (tester) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(900, 1200);
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(const BugManGraphsApp());
-
-    await tester.tap(find.text('New Job'));
+    final repository = MemoryGraphRepository();
+    await repository.saveGraph(GraphDocument.forJob(Job(
+        customerName: 'Linked customer',
+        serviceAddress: '1 Test Way',
+        pestPacLocationNumber: 'LOC-42',
+        pestPacBillToNumber: 'BILL-84',
+        serviceType: 'Inspection',
+        createdBy: 'Tester',
+        createdDate: DateTime(2026, 9, 9))));
+    await tester
+        .pumpWidget(MaterialApp(home: HomeScreen(repository: repository)));
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.widgetWithText(TextField, 'PestPac Location #'),
-      'LOC-42',
-    );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'PestPac Bill-To #'),
-      'BILL-84',
-    );
-    await tester.tap(find.text('Create Graph'));
-    await tester.pumpAndSettle();
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-
     expect(find.text('Location # LOC-42'), findsOneWidget);
     expect(find.text('Bill-To # BILL-84'), findsOneWidget);
   });
@@ -284,13 +284,15 @@ void main() {
     await tester.tap(find.text('Edit job information'));
     await tester.pumpAndSettle();
     await tester.enterText(
-      find.widgetWithText(TextField, 'Location Name'),
+      find.widgetWithText(TextField, 'Company'),
       'Updated Location',
     );
     await tester.enterText(
-      find.widgetWithText(TextField, 'Location Address'),
+      find.widgetWithText(TextField, 'Street Address'),
       '20 New Road',
     );
+    await tester.scrollUntilVisible(find.text('Save Changes'), 400,
+        scrollable: find.byType(Scrollable).first);
     await tester.tap(find.text('Save Changes'));
     await tester.pumpAndSettle();
 

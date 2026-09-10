@@ -37,6 +37,7 @@ SavedGraphSummary summaryForDocument(GraphDocument document) =>
     SavedGraphSummary(
       id: document.id,
       job: Job(
+        intakeDetails: Map<String, String>.of(document.customer.intakeDetails),
         id: document.id,
         customerName: document.customer.name,
         serviceAddress: document.customer.serviceAddress,
