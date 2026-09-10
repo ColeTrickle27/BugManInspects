@@ -3,6 +3,7 @@
 import 'dart:html' as html;
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:js_util' as js_util;
 
 /// Returns a disposer. Only the verified embedding parent can request pixels.
 void Function() listenForPresentationExport({
@@ -21,7 +22,8 @@ void Function() listenForPresentationExport({
     final data = event.data;
     if (disposed ||
         event.origin != origin ||
-        event.source != parent ||
+        !identical(js_util.getProperty<Object?>(event, 'source'),
+            js_util.getProperty<Object?>(html.window, 'parent')) ||
         data is! Map ||
         data['type'] != 'bugman-graph:export-presentation' ||
         data['graphKey'] != graphKey) {
