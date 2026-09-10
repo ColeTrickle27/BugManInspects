@@ -413,6 +413,7 @@ class GraphCustomerInfo {
     required this.pestPacBillToNumber,
     required this.serviceType,
     required this.createdBy,
+    this.intakeDetails = const {},
   });
 
   factory GraphCustomerInfo.fromJob(Job job) => GraphCustomerInfo(
@@ -422,6 +423,7 @@ class GraphCustomerInfo {
         pestPacBillToNumber: job.pestPacBillToNumber,
         serviceType: job.serviceType,
         createdBy: job.createdBy,
+        intakeDetails: Map<String, String>.of(job.intakeDetails),
       );
 
   factory GraphCustomerInfo.fromJson(Map<String, Object?> json) {
@@ -436,6 +438,10 @@ class GraphCustomerInfo {
       pestPacBillToNumber: _string(json['pestPacBillToNumber']),
       serviceType: _string(json['serviceType']),
       createdBy: _string(json['createdBy']),
+      intakeDetails: (json['intakeDetails'] is Map)
+          ? (json['intakeDetails'] as Map).map(
+              (key, value) => MapEntry(key.toString(), value?.toString() ?? ''))
+          : const {},
     );
   }
 
@@ -445,6 +451,7 @@ class GraphCustomerInfo {
   final String pestPacBillToNumber;
   final String serviceType;
   final String createdBy;
+  final Map<String, String> intakeDetails;
 
   String get displayName => name.trim().isEmpty ? 'Untitled Job' : name;
 
@@ -456,6 +463,7 @@ class GraphCustomerInfo {
         'pestPacAccountNumber': pestPacLocationNumber,
         'serviceType': serviceType,
         'createdBy': createdBy,
+        'intakeDetails': intakeDetails,
       };
 }
 

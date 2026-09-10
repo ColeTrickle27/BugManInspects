@@ -10,8 +10,9 @@
 ///
 /// BugMan Graphs does NOT own customer data. It only reads Ops Brain's
 /// Bill-To / Location records through [CustomerFilesService]. If a customer
-/// cannot be found there, the UI must fall back to manual entry of the exact
-/// PestPac identifiers -- never invent or duplicate a customer record.
+/// cannot be found there, a new graph may remain unassigned. Never invent or
+/// duplicate a customer record. Canonical search adds optional contact and ID
+/// snapshots without changing Customer Files storage authority.
 library;
 
 /// A PestPac Bill-To account, as mirrored inside Ops Brain's Customer Files.
@@ -39,6 +40,10 @@ class CustomerLocation {
     this.locationAddress,
     this.lastModified,
     this.prefix,
+    this.phone = '',
+    this.email = '',
+    this.customerLocationId = '',
+    this.billToId = '',
   });
 
   final String billToNumber;
@@ -56,6 +61,10 @@ class CustomerLocation {
   /// opaque Ops Brain implementation detail -- never construct this here,
   /// only pass through what Ops Brain returns.
   final String? prefix;
+  final String phone;
+  final String email;
+  final String customerLocationId;
+  final String billToId;
 
   /// Combined "Bill-To Name — Location Name" label for search results.
   String get displayLabel =>

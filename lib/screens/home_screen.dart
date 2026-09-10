@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/job.dart';
 import '../services/graph_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ops_brain_home_button.dart';
 import 'graph_canvas_screen.dart';
 import 'new_job_screen.dart';
 
@@ -51,15 +52,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.red,
+      backgroundColor: const Color(0xFFC20000),
       appBar: AppBar(
         title: const Text('BugMan Graphs'),
+        actions: const [OpsBrainHomeButton()],
         centerTitle: false,
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(4),
           child: SizedBox(
             height: 4,
-            child: ColoredBox(color: AppColors.red),
+            child: ColoredBox(color: Color(0xFFC20000)),
           ),
         ),
       ),
@@ -102,6 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: const Color(0xFFC20000),
         onPressed: () async {
           await Navigator.of(context).pushNamed(NewJobScreen.routeName);
           if (mounted) _refresh();
@@ -234,7 +237,7 @@ class _EmptyJobsState extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: AppColors.white,
                     border: Border.all(
-                      color: AppColors.wolfGrey,
+                      color: const Color(0xFF7D7D7D),
                       width: 1.5,
                     ),
                     borderRadius: BorderRadius.circular(24),
@@ -330,7 +333,7 @@ class _JobCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       color: AppColors.white,
       shape: RoundedRectangleBorder(
-        side: const BorderSide(color: AppColors.wolfGrey, width: 1.5),
+        side: const BorderSide(color: Color(0xFF7D7D7D), width: 1.5),
         borderRadius: BorderRadius.circular(12),
       ),
       child: InkWell(

@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models/trace_geometry.dart';
 import 'address_suggestion_service.dart';
 import 'address_suggestion_service_stub.dart';
+import 'bugman_portal_service.dart';
 
 AddressSuggestionService createAddressSuggestionService() =>
     HttpAddressSuggestionService();
@@ -115,13 +116,15 @@ class HttpAddressSuggestionService implements AddressSuggestionService {
       );
     } on http.ClientException {
       throw const AddressSuggestionServiceException(
-        'Address suggestions could not be reached. Check that you are signed '
-        'in to OpsBrain, then try again.',
+        'Address search could not be reached. Check your connection and try again.',
       );
     }
   }
 
   Map<String, dynamic> _decodeResponse(http.Response response) {
+    if (response.statusCode == 401) {
+      throw PortalAuthenticationException('$_apiOrigin/');
+    }
     dynamic decoded;
     try {
       decoded = jsonDecode(response.body);

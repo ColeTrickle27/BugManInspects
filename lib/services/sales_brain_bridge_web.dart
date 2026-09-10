@@ -1,6 +1,73 @@
 // ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
 
 import 'dart:html' as html;
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
+
+/// Returns a disposer. Only the verified embedding parent can request pixels.
+void Function() listenForPresentationExport({
+  required String graphKey,
+  required Future<Uint8List> Function() capture,
+}) {
+  final origin =
+      _verifiedReturnOrigin(Uri.base.queryParameters['returnOrigin']);
+  final parent = html.window.parent;
+  if (origin == null || parent == html.window || graphKey.isEmpty) return () {};
+  var disposed = false;
+  var busy = false;
+  String? completedId;
+  Map<String, String>? completedResponse;
+  final subscription = html.window.onMessage.listen((event) async {
+    final data = event.data;
+    if (disposed ||
+        event.origin != origin ||
+        !(event as JSObject)
+            .getProperty<JSAny?>('source'.toJS)
+            .strictEquals(globalContext.getProperty<JSAny?>('parent'.toJS))
+            .toDart ||
+        data is! Map ||
+        data['type'] != 'bugman-graph:export-presentation' ||
+        data['graphKey'] != graphKey) {
+      return;
+    }
+    final requestId = data['requestId'];
+    if (requestId is! String || requestId.isEmpty || requestId.length > 200) {
+      return;
+    }
+    if (completedId == requestId && completedResponse != null) {
+      parent?.postMessage(completedResponse, origin);
+      return;
+    }
+    if (busy) return;
+    busy = true;
+    final response = <String, String>{
+      'requestId': requestId,
+      'graphKey': graphKey
+    };
+    try {
+      final encoded = base64Encode(await capture());
+      if (encoded.length > 14 * 1024 * 1024) throw StateError('Too large');
+      response.addAll(
+          {'type': 'bugman-graph:presentation-png', 'pngBase64': encoded});
+    } catch (_) {
+      response.addAll({
+        'type': 'bugman-graph:presentation-error',
+        'error': 'The customer graph image could not be prepared.'
+      });
+    }
+    busy = false;
+    if (disposed) return;
+    completedId = requestId;
+    completedResponse = response;
+    parent?.postMessage(response, origin);
+  });
+  return () {
+    disposed = true;
+    subscription.cancel();
+  };
+}
 
 const Set<String> _allowedReturnOrigins = <String>{
   'https://ops.holloman-ext.com',

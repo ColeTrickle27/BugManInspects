@@ -5,6 +5,8 @@ import 'package:http/browser_client.dart';
 
 import '../models/customer_file.dart';
 import 'customer_files_service.dart';
+import 'customer_identity_adapter.dart';
+import 'bugman_portal_service.dart';
 
 CustomerFilesService createOpsBrainCustomerFilesService() =>
     HttpCustomerFilesService();
@@ -35,15 +37,16 @@ class HttpCustomerFilesService implements CustomerFilesService {
   @override
   Future<List<CustomerSearchResult>> searchCustomers(String query) async {
     final trimmed = query.trim();
-    if (trimmed.isEmpty) return const [];
-    final uri = Uri.parse('$_apiOrigin/api/search')
+    if (trimmed.length < 2) return const [];
+    final uri = Uri.parse('$_apiOrigin/api/customer-identity/search')
         .replace(queryParameters: {'q': trimmed});
     final payload = await _get(uri);
     final results = payload['results'];
     if (results is! List) return const [];
     return results
         .whereType<Map>()
-        .map((row) => _rowToSearchResult(row))
+        .map(canonicalCustomerSearchResult)
+        .whereType<CustomerSearchResult>()
         .toList();
   }
 
@@ -65,31 +68,13 @@ class HttpCustomerFilesService implements CustomerFilesService {
     if (billToNumber.trim().isEmpty || locationNumber.trim().isEmpty) {
       return null;
     }
-    final uri = Uri.parse('$_apiOrigin/api/location').replace(
-      queryParameters: {
-        'billTo': billToNumber,
-        'location': locationNumber,
-      },
-    );
-    try {
-      final payload = await _get(uri);
-      final location = payload['location'];
-      if (location is! Map) return null;
-      return _rowToLocation(location);
-    } on OpsBrainNotFoundException {
-      return null;
+    for (final result in await searchCustomers(locationNumber)) {
+      if (result.location.billToNumber == billToNumber.trim() &&
+          result.location.locationNumber == locationNumber.trim()) {
+        return result.location;
+      }
     }
-  }
-
-  CustomerSearchResult _rowToSearchResult(Map row) {
-    final location = _rowToLocation(row);
-    return CustomerSearchResult(
-      billTo: CustomerBillTo(
-        billToNumber: location.billToNumber,
-        billToName: location.billToName,
-      ),
-      location: location,
-    );
+    return null;
   }
 
   CustomerLocation _rowToLocation(Map row) {
@@ -99,9 +84,8 @@ class HttpCustomerFilesService implements CustomerFilesService {
       billToName: field('billToName'),
       locationNumber: field('locationNumber'),
       locationName: field('locationName'),
-      locationAddress: field('locationAddress').isEmpty
-          ? null
-          : field('locationAddress'),
+      locationAddress:
+          field('locationAddress').isEmpty ? null : field('locationAddress'),
       lastModified:
           field('lastModified').isEmpty ? null : field('lastModified'),
       prefix: field('prefix').isEmpty ? null : field('prefix'),
@@ -114,6 +98,9 @@ class HttpCustomerFilesService implements CustomerFilesService {
   }
 
   Map<String, dynamic> _decodeResponse(http.Response response) {
+    if (response.statusCode == 401) {
+      throw PortalAuthenticationException('$_apiOrigin/');
+    }
     Object? decoded;
     try {
       decoded = jsonDecode(response.body);

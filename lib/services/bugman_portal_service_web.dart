@@ -165,6 +165,9 @@ class HttpBugManPortalService implements BugManPortalService {
   }
 
   Map<String, dynamic> _decodeResponse(http.Response response) {
+    if (response.statusCode == 401) {
+      throw PortalAuthenticationException('$_apiOrigin/');
+    }
     final decoded = jsonDecode(response.body);
     final payload = decoded is Map<String, dynamic>
         ? decoded

@@ -22,6 +22,7 @@ import 'trace_workspace_screen.dart';
 import '../services/export_bounds_calculator.dart';
 import '../services/bugman_portal_service_factory.dart';
 import '../services/bugman_portal_service.dart';
+import '../services/portal_sign_in.dart';
 import '../services/graph_export_legend.dart';
 import '../services/graph_image_export.dart';
 import '../services/measurement_format.dart';
@@ -37,6 +38,7 @@ import '../services/marker_defaults_store_factory.dart';
 import '../services/sales_brain_bridge.dart';
 import '../services/sales_brain_navigation.dart';
 import '../services/trace_projection_service.dart';
+import '../services/trace_workspace_defaults.dart';
 import '../widgets/canvas_toolbar.dart';
 import '../widgets/freehand_strokes_painter.dart';
 import '../widgets/graph_annotations_painter.dart';
@@ -52,6 +54,7 @@ class GraphCanvasScreen extends StatefulWidget {
     this.repository,
     this.photoPicker,
     this.portalService,
+    this.onPortalSignIn,
     this.portalKey,
     this.markerDefaultsStore,
     this.presentationMode = false,
@@ -66,6 +69,7 @@ class GraphCanvasScreen extends StatefulWidget {
   final GraphRepository? repository;
   final GraphPhotoPicker? photoPicker;
   final BugManPortalService? portalService;
+  final ValueChanged<String>? onPortalSignIn;
   final String? portalKey;
   final MarkerDefaultsStore? markerDefaultsStore;
   final bool presentationMode;
@@ -89,6 +93,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   final FocusNode _editorFocusNode = FocusNode(debugLabel: 'Graph editor');
   bool _multiTouchPanning = false;
   final GlobalKey _canvasBoundaryKey = GlobalKey(debugLabel: 'Graph export');
+  final GlobalKey _presentationBoundaryKey =
+      GlobalKey(debugLabel: 'Customer graph export');
+  void Function()? _stopPresentationExport;
   final GlobalKey _canvasViewportKey = GlobalKey(debugLabel: 'Graph viewport');
   final TransformationController _transformationController =
       TransformationController();
@@ -253,6 +260,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _markerDefaultsStore =
         widget.markerDefaultsStore ?? createMarkerDefaultsStore();
     _loadPersistedMarkerDefaults();
+    if (widget.presentationMode && _portalKey != null) {
+      _stopPresentationExport = listenForPresentationExport(
+        graphKey: _portalKey!,
+        capture: _capturePresentationPng,
+      );
+    }
   }
 
   /// Merges any previously saved "Set as Default" marker styles into
@@ -306,6 +319,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   @override
   void dispose() {
+    _stopPresentationExport?.call();
     _document.removeListener(_handleDocumentChanged);
     _document.dispose();
     _interaction.dispose();
@@ -364,7 +378,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       _activePathStartSegmentIndex = null;
       _pendingCurveControlPoint = null;
       _previewSegment = null;
-      _canvasStatus = '${preset.label}: click each corner, then Close Shape';
+      _canvasStatus = preset == GraphDrawingPreset.measurementLine
+          ? 'Measure: place two or more points, then Finish Measure'
+          : '${preset.label}: click each corner, then Close Shape';
     });
     _editorFocusNode.requestFocus();
   }
@@ -1738,8 +1754,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     setState(() {
       _wallSegments = <WallSegment>[..._wallSegments, segment];
       _activeWallStart = nextPoint;
-      _canvasStatus = '${_selectedStructureType.label}: corner placed • '
-          'Close Shape, Enter, or double-click';
+      _canvasStatus =
+          _selectedStructureType == GraphDrawingPreset.measurementLine
+              ? 'Measure: point placed • Finish Measure, Enter, or double-click'
+              : '${_selectedStructureType.label}: corner placed • '
+                  'Close Shape, Enter, or double-click';
     });
   }
 
@@ -1772,12 +1791,16 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         pathStart == null ||
         pathEnd == null ||
         before == null) {
-      _showCanvasMessage('Place the first structure point before finishing');
+      _showCanvasMessage(preset == GraphDrawingPreset.measurementLine
+          ? 'Place two measurement points before finishing'
+          : 'Place the first structure point before finishing');
       return;
     }
 
     final segmentCount = _wallSegments.length - startIndex;
-    final isArea = preset.kind == GraphDrawingPresetKind.area;
+    // Preserve old saved area measurements; new measurements are open paths.
+    final isArea = preset.kind == GraphDrawingPresetKind.area &&
+        preset != GraphDrawingPreset.measurementLine;
     final closesShape = isArea || preset == GraphDrawingPreset.propertyLine;
     if (segmentCount < (closesShape ? 2 : 1)) {
       _showCanvasMessage(
@@ -4671,7 +4694,8 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         context: context,
         showDragHandle: true,
         builder: (context) {
-          final jobAddress = _document.customer.serviceAddress.trim();
+          final jobAddress =
+              traceWorkspaceAddress(_traces, _document.customer.serviceAddress);
           return SafeArea(
             child: ConstrainedBox(
               constraints: BoxConstraints(
@@ -4755,7 +4779,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => TraceWorkspaceScreen(
-          address: _document.customer.serviceAddress,
+          address: traceWorkspaceAddress(
+              _traces, _document.customer.serviceAddress,
+              editingTrace: initialTrace),
           canvasSize: _canvasSize,
           traceLabel:
               initialTrace?.label ?? 'Property Trace ${_traces.length + 1}',
@@ -4960,6 +4986,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       error.toString().contains('Saved graph not found.');
 
   Future<bool> _saveDocument() async {
+    var savedOnDevice = false;
     try {
       final referencedAttachmentIds =
           _annotations.expand((annotation) => annotation.attachmentIds).toSet();
@@ -4987,6 +5014,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
         blobs: _pendingPhotoBlobs,
         deletedBlobKeys: _deletedPhotoBlobKeys,
       );
+      savedOnDevice = true;
       PortalUploadResult? portalResult;
       var recoveredAsNew = false;
       if (_portalService.isAvailable) {
@@ -5039,6 +5067,34 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
       return true;
     } catch (error) {
       if (!mounted) return false;
+      if (error is PortalAuthenticationException) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Sign in to save online'),
+            content: Text(
+              '${savedOnDevice ? 'Your graph is saved on this device. ' : ''}'
+              'Sign in to Holloman Ops Brain in a separate tab, then return '
+              'to this graph and choose Save again. Keep this graph tab open '
+              'to preserve your current drawing and photos.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Keep editing'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  (widget.onPortalSignIn ?? openPortalSignIn)(error.signInUrl);
+                  Navigator.of(dialogContext).pop();
+                },
+                child: const Text('Sign in in new tab'),
+              ),
+            ],
+          ),
+        );
+        return false;
+      }
       _showCanvasMessage(
         'Graph could not be saved: $error',
         severity: _CanvasMessageSeverity.error,
@@ -6776,6 +6832,11 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
                           onUndo: _undoLastAction,
                           onRedo: _redoLastAction,
                           onFinish: _finishWallPath,
+                          finishLabel: _selectedTool == CanvasTool.structure &&
+                                  _selectedStructureType ==
+                                      GraphDrawingPreset.measurementLine
+                              ? 'Finish Measure'
+                              : 'Close Shape',
                           onClear: _confirmClearGraph,
                           onSaveGraphFile: _handleGraphFileSaveTapped,
                           onExportPdf: _exportGraphPdf,
@@ -6902,6 +6963,37 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     );
   }
 
+  Future<Uint8List> _capturePresentationPng() async {
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !widget.presentationMode) throw StateError('Unavailable');
+    final boundary = _presentationBoundaryKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null) throw StateError('Not ready');
+    // A separate filtered document keeps internal markup out of crop bounds too.
+    final presentation = GraphDocument(
+      customer: _document.customer,
+      wallSegments: _wallSegments,
+      shapes: _shapes,
+      traces: _traces,
+      annotations: _annotations
+          .where((annotation) =>
+              annotation.kind == GraphAnnotationKind.marker &&
+              widget.presentationMarkerIds.contains(annotation.id))
+          .toList(),
+    );
+    try {
+      return await GraphImageExport.capturePng(
+          boundary,
+          ExportBoundsCalculator.forDocument(presentation,
+              canvasSize: _canvasSize,
+              treatmentVisible: false,
+              photosVisible: false,
+              traceVisible: true));
+    } finally {
+      presentation.dispose();
+    }
+  }
+
   Widget _buildPresentationView(BuildContext context) {
     final visibleAnnotations = _annotations
         .where((annotation) =>
@@ -6927,39 +7019,42 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
               minScale: 0.25,
               maxScale: 10,
               boundaryMargin: const EdgeInsets.all(1200),
-              child: _CanvasSurface(
-                canvasSize: _canvasSize,
-                wallSegments: _wallSegments,
-                annotations: visibleAnnotations,
-                shapes: _shapes,
-                freehandStrokes: const <FreehandStroke>[],
-                traces: const <TraceGeometry>[],
-                draftFreehandPoints: const <GraphPoint>[],
-                previewShapeSegments: const <WallSegment>[],
-                previewShape: null,
-                hiddenSegmentIndexes: _shapeSegmentIndexSet,
-                gridVisible: false,
-                selectedSegmentIndex: null,
-                selectedAnnotationIndex: null,
-                selectedShapeIndex: null,
-                selectedFreehandIndex: null,
-                selectedTraceIndex: null,
-                hoveredSegmentIndex: null,
-                hoveredAnnotationIndex: null,
-                hoveredShapeIndex: null,
-                hoveredFreehandIndex: null,
-                hoveredTraceIndex: null,
-                activeWallStart: null,
-                previewSegment: null,
-                treatmentCalloutTip: null,
-                treatmentCalloutBox: null,
-                activeCalloutKind: null,
-                structureVisible: true,
-                shapesVisible: true,
-                inspectionsVisible: true,
-                treatmentVisible: false,
-                photosVisible: false,
-                traceLayerVisible: false,
+              child: RepaintBoundary(
+                key: _presentationBoundaryKey,
+                child: _CanvasSurface(
+                  canvasSize: _canvasSize,
+                  wallSegments: _wallSegments,
+                  annotations: visibleAnnotations,
+                  shapes: _shapes,
+                  freehandStrokes: const <FreehandStroke>[],
+                  traces: _traces,
+                  draftFreehandPoints: const <GraphPoint>[],
+                  previewShapeSegments: const <WallSegment>[],
+                  previewShape: null,
+                  hiddenSegmentIndexes: _shapeSegmentIndexSet,
+                  gridVisible: false,
+                  selectedSegmentIndex: null,
+                  selectedAnnotationIndex: null,
+                  selectedShapeIndex: null,
+                  selectedFreehandIndex: null,
+                  selectedTraceIndex: null,
+                  hoveredSegmentIndex: null,
+                  hoveredAnnotationIndex: null,
+                  hoveredShapeIndex: null,
+                  hoveredFreehandIndex: null,
+                  hoveredTraceIndex: null,
+                  activeWallStart: null,
+                  previewSegment: null,
+                  treatmentCalloutTip: null,
+                  treatmentCalloutBox: null,
+                  activeCalloutKind: null,
+                  structureVisible: true,
+                  shapesVisible: true,
+                  inspectionsVisible: true,
+                  treatmentVisible: false,
+                  photosVisible: false,
+                  traceLayerVisible: true,
+                ),
               ),
             );
           },
@@ -6974,6 +7069,7 @@ class _TopEditorToolbar extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onFinish,
+    required this.finishLabel,
     required this.onClear,
     required this.onSaveGraphFile,
     required this.onExportPdf,
@@ -6994,6 +7090,7 @@ class _TopEditorToolbar extends StatelessWidget {
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onFinish;
+  final String finishLabel;
   final VoidCallback onClear;
   final VoidCallback onSaveGraphFile;
   final VoidCallback onExportPdf;
@@ -7035,7 +7132,7 @@ class _TopEditorToolbar extends StatelessWidget {
               ),
               const _ToolbarDivider(),
               _TopButton(
-                  icon: Icons.done, label: 'Close Shape', onPressed: onFinish),
+                  icon: Icons.done, label: finishLabel, onPressed: onFinish),
               _TopButton(
                 icon: Icons.delete_outline,
                 label: 'Clear Graph',

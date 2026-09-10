@@ -6,6 +6,9 @@ import '../models/customer_file.dart';
 import '../models/job.dart';
 import '../services/customer_files_service.dart';
 import '../services/customer_files_service_factory.dart';
+import '../services/bugman_portal_service.dart';
+import '../services/portal_sign_in.dart';
+import '../widgets/ops_brain_home_button.dart';
 import 'graph_canvas_screen.dart';
 
 class NewJobScreen extends StatefulWidget {
@@ -58,6 +61,7 @@ class _NewJobScreenState extends State<NewJobScreen> {
   final _pestPacBillToController = TextEditingController();
   final _createdByController = TextEditingController();
   final _searchController = TextEditingController();
+  final _stateController = TextEditingController(text: 'NC');
   late final TextEditingController _dateController;
   late DateTime _createdDate;
   late final CustomerFilesService _customerFilesService;
@@ -66,14 +70,30 @@ class _NewJobScreenState extends State<NewJobScreen> {
 
   CustomerLocation? _selectedLocation;
   bool _manualEntryOverride = false;
+  int _searchRequest = 0;
+  String? _signInUrl;
+  String _customerType = '';
+  final _details = <String, TextEditingController>{
+    for (final key in [
+      'company',
+      'first',
+      'last',
+      'city',
+      'zip',
+      'phone',
+      'email',
+      'contactName',
+      'contactPhone'
+    ])
+      key: TextEditingController(),
+  };
   bool _searching = false;
   String? _searchError;
   List<CustomerSearchResult> _searchResults = const [];
   Timer? _searchDebounce;
   bool _warningDismissed = false;
 
-  bool get _searchFlowEnabled =>
-      !widget.editOnly && _customerFilesService.isAvailable;
+  bool get _searchFlowEnabled => _customerFilesService.isAvailable;
 
   bool get _showingLocationSummary =>
       _searchFlowEnabled && !_manualEntryOverride && _selectedLocation != null;
@@ -87,22 +107,48 @@ class _NewJobScreenState extends State<NewJobScreen> {
     _customerFilesService =
         widget.customerFilesService ?? createCustomerFilesService();
     final initialJob = widget.initialJob;
+    _manualEntryOverride = initialJob != null
+        ? initialJob.pestPacBillToNumber.isEmpty ||
+            initialJob.pestPacLocationNumber.isEmpty
+        : !_customerFilesService.isAvailable;
     _createdDate = DateUtils.dateOnly(
       initialJob?.createdDate ?? DateTime.now(),
     );
     _dateController = TextEditingController(text: _formatDate(_createdDate));
     if (initialJob != null) {
-      _locationNameController.text = initialJob.customerName;
+      final details = initialJob.intakeDetails;
+      for (final entry in _details.entries) {
+        entry.value.text = details[entry.key] ?? '';
+      }
+      if (details.isEmpty) _details['company']!.text = initialJob.customerName;
+      _customerType = details['customerType'] ?? '';
+      _locationNameController.text =
+          details['locationName'] ?? initialJob.customerName;
       _locationAddressController.text = initialJob.serviceAddress;
       _pestPacLocationController.text = initialJob.pestPacLocationNumber;
       _pestPacBillToController.text = initialJob.pestPacBillToNumber;
       _createdByController.text = initialJob.createdBy;
+      if (initialJob.pestPacBillToNumber.isNotEmpty &&
+          initialJob.pestPacLocationNumber.isNotEmpty) {
+        _selectedLocation = CustomerLocation(
+          billToNumber: initialJob.pestPacBillToNumber,
+          billToName: initialJob.customerName,
+          locationNumber: initialJob.pestPacLocationNumber,
+          locationName: _locationNameController.text,
+          locationAddress: initialJob.serviceAddress,
+          customerLocationId: details['customerLocationId'] ?? '',
+          billToId: details['billToId'] ?? '',
+        );
+      }
+      _locationAddressController.text =
+          details['streetAddress'] ?? initialJob.serviceAddress;
       _serviceType = NewJobScreen.serviceTypes.contains(initialJob.serviceType)
           ? initialJob.serviceType
           : 'Inspection';
     }
     final preselected = widget.preselectedLocation;
     if (preselected != null) {
+      _manualEntryOverride = false;
       _selectedLocation = preselected;
       _applyLocation(preselected);
     }
@@ -117,20 +163,48 @@ class _NewJobScreenState extends State<NewJobScreen> {
     _createdByController.dispose();
     _dateController.dispose();
     _searchController.dispose();
+    _stateController.dispose();
     _searchDebounce?.cancel();
+    for (final controller in _details.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
   void _applyLocation(CustomerLocation location) {
+    for (final controller in _details.values) {
+      controller.clear();
+    }
+    _details['company']!.text = location.billToName;
+    _details['phone']!.text = location.phone;
+    _details['email']!.text = location.email;
+    _customerType = '';
     _locationNameController.text = location.locationName.isNotEmpty
         ? location.locationName
         : location.billToName;
     _locationAddressController.text = location.locationAddress ?? '';
     _pestPacLocationController.text = location.locationNumber;
     _pestPacBillToController.text = location.billToNumber;
+    final previous = widget.initialJob;
+    if (previous != null &&
+        previous.pestPacBillToNumber == location.billToNumber &&
+        previous.pestPacLocationNumber == location.locationNumber) {
+      for (final entry in _details.entries) {
+        final saved = previous.intakeDetails[entry.key];
+        if (saved != null && saved.isNotEmpty) entry.value.text = saved;
+      }
+      _locationAddressController.text =
+          previous.intakeDetails['streetAddress'] ??
+              _locationAddressController.text;
+      _customerType = previous.intakeDetails['customerType'] ?? '';
+    }
   }
 
   void _clearLocationFields() {
+    for (final controller in _details.values) {
+      controller.clear();
+    }
+    _customerType = '';
     _locationNameController.clear();
     _locationAddressController.clear();
     _pestPacLocationController.clear();
@@ -138,6 +212,8 @@ class _NewJobScreenState extends State<NewJobScreen> {
   }
 
   void _selectLocation(CustomerLocation location) {
+    _searchDebounce?.cancel();
+    _searchRequest += 1;
     setState(() {
       _selectedLocation = location;
       _applyLocation(location);
@@ -148,6 +224,8 @@ class _NewJobScreenState extends State<NewJobScreen> {
   }
 
   void _changeCustomer() {
+    _searchDebounce?.cancel();
+    _searchRequest += 1;
     setState(() {
       _selectedLocation = null;
       _clearLocationFields();
@@ -158,52 +236,59 @@ class _NewJobScreenState extends State<NewJobScreen> {
   }
 
   void _toggleManualEntry(bool manual) {
+    if (manual == _manualEntryOverride) return;
+    _searchDebounce?.cancel();
+    _searchRequest += 1;
     setState(() {
       _manualEntryOverride = manual;
-      if (manual) {
-        _selectedLocation = null;
-      } else {
-        _clearLocationFields();
-        _searchResults = const [];
-        _searchController.clear();
-        _searchError = null;
-      }
+      _selectedLocation = null;
+      _clearLocationFields();
+      _searchResults = const [];
+      _searchController.clear();
+      _searchError = null;
+      _signInUrl = null;
+      _searching = false;
     });
   }
 
   void _onSearchChanged(String query) {
     _searchDebounce?.cancel();
-    if (query.trim().isEmpty) {
-      setState(() {
-        _searchResults = const [];
-        _searching = false;
-        _searchError = null;
-      });
-      return;
-    }
-    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
-      _runSearch(query);
+    final request = ++_searchRequest;
+    setState(() {
+      _searchResults = const [];
+      _searching = false;
+      _searchError = null;
+      _signInUrl = null;
+    });
+    if (query.trim().length < 2) return;
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+      _runSearch(query.trim(), request);
     });
   }
 
-  Future<void> _runSearch(String query) async {
+  Future<void> _runSearch(String query, int request) async {
     setState(() {
       _searching = true;
-      _searchError = null;
     });
     try {
       final results = await _customerFilesService.searchCustomers(query);
-      if (!mounted) return;
+      if (!mounted || request != _searchRequest) return;
       setState(() {
         _searchResults = results;
         _searching = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || request != _searchRequest) return;
       setState(() {
         _searchResults = const [];
         _searching = false;
-        _searchError = 'Customer search failed. Try again or enter manually.';
+        if (error is PortalAuthenticationException) {
+          _signInUrl = error.signInUrl;
+          _searchError =
+              'Sign in to OpsBrain in a new tab, then retry your search here.';
+        } else {
+          _searchError = 'Customer search is unavailable. Try again.';
+        }
       });
     }
   }
@@ -226,10 +311,39 @@ class _NewJobScreenState extends State<NewJobScreen> {
   }
 
   void _createJob() {
+    if (!_manualEntryOverride && _selectedLocation == null) {
+      setState(() {
+        _searchError = 'Select an existing customer or choose New Customer.';
+      });
+      return;
+    }
+    final details = <String, String>{
+      ...?widget.initialJob?.intakeDetails,
+      for (final entry in _details.entries) entry.key: entry.value.text.trim(),
+      'leadType': _manualEntryOverride ? 'New Customer' : 'Existing Customer',
+      'locationName': _locationNameController.text.trim(),
+      'streetAddress': _locationAddressController.text.trim(),
+      'state': 'NC',
+      'customerType': _customerType,
+      'customerLocationId': _selectedLocation?.customerLocationId ?? '',
+      'billToId': _selectedLocation?.billToId ?? '',
+    };
+    final name = details['company']!.isNotEmpty
+        ? details['company']!
+        : [details['first']!, details['last']!]
+            .where((value) => value.isNotEmpty)
+            .join(' ');
+    final address = [
+      details['streetAddress']!,
+      details['city']!,
+      if (details['city']!.isNotEmpty || details['zip']!.isNotEmpty) 'NC',
+      details['zip']!
+    ].where((value) => value.isNotEmpty).join(', ');
     final job = Job(
+      intakeDetails: details,
       id: widget.initialJob?.id,
-      customerName: _locationNameController.text.trim(),
-      serviceAddress: _locationAddressController.text.trim(),
+      customerName: name,
+      serviceAddress: address,
       pestPacLocationNumber: _pestPacLocationController.text.trim(),
       pestPacBillToNumber: _pestPacBillToController.text.trim(),
       serviceType: _serviceType,
@@ -255,6 +369,7 @@ class _NewJobScreenState extends State<NewJobScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.editOnly ? 'Edit Job' : 'New Job'),
+        actions: const [OpsBrainHomeButton()],
       ),
       body: SafeArea(
         child: ListView(
@@ -267,6 +382,25 @@ class _NewJobScreenState extends State<NewJobScreen> {
               ),
             if (widget.resolutionWarning != null && !_warningDismissed)
               const SizedBox(height: 12),
+            Wrap(spacing: 8, children: [
+              ChoiceChip(
+                  label: const Text('Existing Customer'),
+                  selected: !_manualEntryOverride,
+                  onSelected: (_) => _toggleManualEntry(false)),
+              ChoiceChip(
+                  label: const Text('New Customer'),
+                  selected: _manualEntryOverride,
+                  onSelected: (_) => _toggleManualEntry(true)),
+            ]),
+            const SizedBox(height: 12),
+            Text(
+                'Bill To: ${_pestPacBillToController.text.isEmpty ? 'New/Unassigned' : _pestPacBillToController.text} · Location: ${_pestPacLocationController.text.isEmpty ? 'New/Unassigned' : _pestPacLocationController.text}'),
+            const SizedBox(height: 12),
+            if (_showingLocationSummary) ..._buildLocationSummary(),
+            if (_showingSearch) ..._buildCustomerSearch(),
+            if (_manualEntryOverride || _selectedLocation != null)
+              ..._buildManualFields(),
+            const SizedBox(height: 12),
             TextField(
               key: const ValueKey('job-date-field'),
               controller: _dateController,
@@ -278,11 +412,6 @@ class _NewJobScreenState extends State<NewJobScreen> {
                 suffixIcon: Icon(Icons.edit_calendar_outlined),
               ),
             ),
-            const SizedBox(height: 12),
-            if (_showingLocationSummary) ..._buildLocationSummary(),
-            if (_showingSearch) ..._buildCustomerSearch(),
-            if (!_searchFlowEnabled || _manualEntryOverride)
-              ..._buildManualFields(),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _serviceType,
@@ -389,8 +518,8 @@ class _NewJobScreenState extends State<NewJobScreen> {
         controller: _searchController,
         onChanged: _onSearchChanged,
         decoration: InputDecoration(
-          labelText: 'Search Customer Files',
-          hintText: 'Name, address, Bill-To, or Location #',
+          labelText: 'Find Customer',
+          hintText: 'Search name, Bill-To, Location, or address…',
           prefixIcon: const Icon(Icons.search),
           suffixIcon: _searching
               ? const Padding(
@@ -413,6 +542,11 @@ class _NewJobScreenState extends State<NewJobScreen> {
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         ),
+      if (_signInUrl != null)
+        TextButton.icon(
+            onPressed: () => openPortalSignIn(_signInUrl!),
+            icon: const Icon(Icons.login),
+            label: const Text('Sign in to OpsBrain')),
       if (_searchResults.isNotEmpty)
         Card(
           margin: EdgeInsets.zero,
@@ -447,63 +581,68 @@ class _NewJobScreenState extends State<NewJobScreen> {
         child: TextButton(
           key: const ValueKey('manual-entry-toggle'),
           onPressed: () => _toggleManualEntry(true),
-          child: const Text('Customer not found -- enter manually'),
+          child: const Text('Customer not found — New Customer'),
         ),
       ),
       const SizedBox(height: 4),
     ];
   }
 
-  List<Widget> _buildManualFields() {
-    return [
-      if (_searchFlowEnabled)
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            key: const ValueKey('search-instead-toggle'),
-            onPressed: () => _toggleManualEntry(false),
-            child: const Text('Search Customer Files instead'),
-          ),
-        ),
-      TextField(
-        controller: _locationNameController,
-        textInputAction: TextInputAction.next,
-        decoration: const InputDecoration(
-          labelText: 'Location Name',
-          prefixIcon: Icon(Icons.business_outlined),
-        ),
-      ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: _locationAddressController,
-        textInputAction: TextInputAction.next,
-        decoration: const InputDecoration(
-          labelText: 'Location Address',
-          prefixIcon: Icon(Icons.location_on_outlined),
-        ),
-      ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: _pestPacLocationController,
-        textInputAction: TextInputAction.next,
-        keyboardType: TextInputType.number,
-        decoration: const InputDecoration(
-          labelText: 'PestPac Location #',
-          prefixIcon: Icon(Icons.confirmation_number_outlined),
-        ),
-      ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: _pestPacBillToController,
-        textInputAction: TextInputAction.next,
-        keyboardType: TextInputType.number,
-        decoration: const InputDecoration(
-          labelText: 'PestPac Bill-To #',
-          prefixIcon: Icon(Icons.receipt_long_outlined),
-        ),
-      ),
-    ];
-  }
+  Widget _detailField(String key, String label,
+          {TextInputType? keyboardType}) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: TextField(
+            controller: _details[key],
+            keyboardType: keyboardType,
+            decoration: InputDecoration(labelText: label)),
+      );
+
+  List<Widget> _buildManualFields() => [
+        Text('Location Fields', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 12),
+        _detailField('company', 'Company'),
+        _detailField('first', 'First Name'),
+        _detailField('last', 'Last Name'),
+        TextField(
+            controller: _locationAddressController,
+            decoration: const InputDecoration(labelText: 'Street Address')),
+        const SizedBox(height: 12),
+        _detailField('city', 'City'),
+        TextField(
+            controller: _stateController,
+            enabled: false,
+            decoration:
+                const InputDecoration(labelText: 'State', hintText: 'NC')),
+        const SizedBox(height: 12),
+        _detailField('zip', 'Zip', keyboardType: TextInputType.number),
+        _detailField('phone', 'Phone', keyboardType: TextInputType.phone),
+        _detailField('email', 'Email',
+            keyboardType: TextInputType.emailAddress),
+        DropdownButtonFormField<String>(
+            key: ValueKey('customer-type-$_customerType'),
+            initialValue: _customerType,
+            decoration: const InputDecoration(labelText: 'Customer Type'),
+            items: const [
+              DropdownMenuItem(value: '', child: Text('Select Customer Type')),
+              DropdownMenuItem(
+                  value: 'Residential', child: Text('Residential')),
+              DropdownMenuItem(value: 'Commercial', child: Text('Commercial'))
+            ],
+            onChanged: (value) => setState(() {
+                  _customerType = value ?? '';
+                })),
+        const SizedBox(height: 12),
+        Text('Primary/Alternate Contact',
+            style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 12),
+        _detailField('contactName', 'Name'),
+        _detailField('contactPhone', 'Phone Number',
+            keyboardType: TextInputType.phone),
+        TextField(
+            controller: _locationNameController,
+            decoration: const InputDecoration(labelText: 'Location Name')),
+      ];
 
   static String _formatDate(DateTime date) =>
       '${date.month.toString().padLeft(2, '0')}/'
