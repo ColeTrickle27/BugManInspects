@@ -7,6 +7,8 @@ import '../models/graph_document.dart';
 import '../models/trace_geometry.dart';
 import '../services/address_suggestion_service.dart';
 import '../services/address_suggestion_service_factory.dart';
+import '../services/bugman_portal_service.dart';
+import '../services/portal_sign_in.dart';
 import '../services/measurement_format.dart';
 import '../services/measurement_service.dart';
 import '../services/trace_map_provider.dart';
@@ -22,6 +24,7 @@ class TraceWorkspaceScreen extends StatefulWidget {
     this.addressService,
     this.initialTrace,
     this.autoSelectJobAddress = true,
+    this.onPortalSignIn,
     super.key,
   });
 
@@ -32,6 +35,7 @@ class TraceWorkspaceScreen extends StatefulWidget {
   final AddressSuggestionService? addressService;
   final TraceGeometry? initialTrace;
   final bool autoSelectJobAddress;
+  final ValueChanged<String>? onPortalSignIn;
 
   @override
   State<TraceWorkspaceScreen> createState() => _TraceWorkspaceScreenState();
@@ -51,6 +55,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
   AddressSelection? _selectedAddress;
   String _sessionToken = '';
   String? _error;
+  String? _signInUrl;
   int _searchRequest = 0;
   bool _initializingMap = true;
   bool _searching = false;
@@ -91,6 +96,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
   }
 
   void _onAddressChanged(String _) {
+    _signInUrl = null;
     _selectedAddress = null;
     _error = null;
     _suggestions = const <AddressSuggestion>[];
@@ -131,6 +137,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
         sessionToken: sessionToken,
       );
       if (!mounted || request != _searchRequest) return;
+      _signInUrl = null;
       if (_shouldAutoSelectJobAddress(query, suggestions)) {
         setState(() {
           _searching = false;
@@ -151,6 +158,8 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
       setState(() {
         _searching = false;
         _suggestions = const <AddressSuggestion>[];
+        _signInUrl =
+            error is PortalAuthenticationException ? error.signInUrl : null;
         _error = _messageFor(error);
       });
     }
@@ -173,6 +182,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
       _selecting = true;
       _searching = false;
       _error = null;
+      _signInUrl = null;
     });
     try {
       final selection = await _addressService.select(
@@ -194,6 +204,8 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
       if (!mounted || request != _searchRequest) return;
       setState(() {
         _selecting = false;
+        _signInUrl =
+            error is PortalAuthenticationException ? error.signInUrl : null;
         _error = _messageFor(error);
       });
     }
@@ -235,6 +247,10 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
       TraceGeometry(
         id: widget.initialTrace?.id ?? newGraphId(),
         label: widget.initialTrace?.label ?? widget.traceLabel,
+        address: _selectedAddress?.standardizedAddress ??
+            ((widget.initialTrace?.address.trim().isNotEmpty ?? false)
+                ? widget.initialTrace!.address
+                : widget.address.trim()),
         geoPoints: List<GeoPoint>.of(_points),
         canvasPoints: projection.canvasPoints,
         metersPerCanvasUnit: projection.metersPerCanvasUnit,
@@ -273,6 +289,25 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
       body: Column(
         children: [
           _buildAddressSearch(),
+          if (_signInUrl != null)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 12,
+                children: [
+                  const Text(
+                      'Sign in in a separate tab, then return and retry. Your trace stays open.'),
+                  TextButton.icon(
+                    onPressed: () => (widget.onPortalSignIn ??
+                        openPortalSignIn)(_signInUrl!),
+                    icon: const Icon(Icons.open_in_new),
+                    label: const Text('Sign in to OpsBrain'),
+                  ),
+                ],
+              ),
+            ),
           Expanded(child: _buildMapBody()),
           Material(
             elevation: 8,

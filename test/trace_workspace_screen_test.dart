@@ -3,11 +3,57 @@ import 'dart:async';
 import 'package:bugman_graphs/models/trace_geometry.dart';
 import 'package:bugman_graphs/screens/trace_workspace_screen.dart';
 import 'package:bugman_graphs/services/address_suggestion_service.dart';
+import 'package:bugman_graphs/services/bugman_portal_service.dart';
 import 'package:bugman_graphs/services/trace_map_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('trace sign in preserves the address and all existing points',
+      (tester) async {
+    final provider = _FakeTraceMapProvider();
+    final service = _FakeAddressSuggestionService()..requiresSignIn = true;
+    String? signInUrl;
+    const trace = TraceGeometry(
+      id: 'recovery-trace',
+      label: 'Recovery trace',
+      geoPoints: [
+        GeoPoint(latitude: 35, longitude: -86),
+        GeoPoint(latitude: 35.0001, longitude: -86),
+        GeoPoint(latitude: 35.0001, longitude: -86.0001),
+      ],
+      canvasPoints: [],
+    );
+    await tester.pumpWidget(MaterialApp(
+        home: TraceWorkspaceScreen(
+      address: '123 Main Street',
+      canvasSize: const Size(3600, 2600),
+      traceLabel: 'Recovery trace',
+      provider: provider,
+      addressService: service,
+      initialTrace: trace,
+      onPortalSignIn: (url) => signInUrl = url,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign in to OpsBrain'), findsOneWidget);
+    expect(provider.points, trace.geoPoints);
+    await tester.tap(find.text('Sign in to OpsBrain'));
+    await tester.pumpAndSettle();
+    expect(signInUrl, 'https://ops.holloman-ext.com/');
+    expect(provider.points, trace.geoPoints);
+    expect(
+        tester
+            .widget<TextField>(
+                find.byKey(const ValueKey('trace-address-field')))
+            .controller!
+            .text,
+        '123 Main Street');
+    service.requiresSignIn = false;
+    await tester.tap(find.text('Search'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign in to OpsBrain'), findsNothing);
+    expect(provider.points, trace.geoPoints);
+  });
   testWidgets(
       'trace workspace opens at the job address and returns a scaled trace',
       (tester) async {
@@ -68,6 +114,7 @@ void main() {
 
     expect(result, isNotNull);
     expect(result!.geoPoints, hasLength(3));
+    expect(result!.address, '123 Main Street, Raleigh, NC 27601');
     expect(result!.canvasPoints, hasLength(3));
     expect(result!.metersPerCanvasUnit, greaterThan(0));
   });
@@ -254,6 +301,7 @@ class _FakeTraceMapProvider implements TraceMapProvider {
 }
 
 class _FakeAddressSuggestionService implements AddressSuggestionService {
+  bool requiresSignIn = false;
   String? lastQuery;
   String? lastSessionToken;
 
@@ -281,6 +329,10 @@ class _FakeAddressSuggestionService implements AddressSuggestionService {
     String query, {
     required String sessionToken,
   }) async {
+    if (requiresSignIn) {
+      throw const PortalAuthenticationException(
+          'https://ops.holloman-ext.com/');
+    }
     lastQuery = query;
     lastSessionToken = sessionToken;
     return const [

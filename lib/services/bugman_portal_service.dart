@@ -2,6 +2,15 @@ import 'dart:typed_data';
 
 import '../models/graph_document.dart';
 
+class PortalAuthenticationException implements Exception {
+  const PortalAuthenticationException(this.signInUrl);
+
+  final String signInUrl;
+
+  @override
+  String toString() => 'Sign in to Holloman Ops Brain to continue.';
+}
+
 class PortalGraphPackage {
   const PortalGraphPackage(
       {required this.document, required this.blobs, required this.name});

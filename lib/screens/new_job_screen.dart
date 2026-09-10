@@ -6,6 +6,7 @@ import '../models/customer_file.dart';
 import '../models/job.dart';
 import '../services/customer_files_service.dart';
 import '../services/customer_files_service_factory.dart';
+import '../widgets/ops_brain_home_button.dart';
 import 'graph_canvas_screen.dart';
 
 class NewJobScreen extends StatefulWidget {
@@ -255,6 +256,7 @@ class _NewJobScreenState extends State<NewJobScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.editOnly ? 'Edit Job' : 'New Job'),
+        actions: const [OpsBrainHomeButton()],
       ),
       body: SafeArea(
         child: ListView(

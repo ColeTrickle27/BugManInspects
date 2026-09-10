@@ -445,38 +445,48 @@ void main() {
     expect(_shapeCount(tester), 1);
   });
 
-  testWidgets(
-      'Quick Measure closes into a filled area with linear and square-foot measurements',
-      (tester) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1400, 900);
-    addTearDown(tester.view.reset);
-    await _pumpEditor(tester);
+  for (final pointCount in [2, 3]) {
+    testWidgets(
+        'Quick Measure accepts $pointCount points as an open distance measurement',
+        (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1400, 900);
+      addTearDown(tester.view.reset);
+      await _pumpEditor(tester);
 
-    await _selectQuickMeasure(tester);
-    final toolbar = tester.widget<CanvasToolbar>(find.byType(CanvasToolbar));
-    expect(toolbar.selectedTool, CanvasTool.structure);
-    expect(toolbar.selectedDrawingPreset, GraphDrawingPreset.measurementLine);
-    await tester.tapAt(const Offset(300, 250));
-    await tester.tapAt(const Offset(500, 250));
-    await tester.tapAt(const Offset(500, 450));
-    await tester.tap(find.text('Close Shape'));
-    await tester.pump();
+      await _selectQuickMeasure(tester);
+      final toolbar = tester.widget<CanvasToolbar>(find.byType(CanvasToolbar));
+      expect(toolbar.selectedTool, CanvasTool.structure);
+      expect(toolbar.selectedDrawingPreset, GraphDrawingPreset.measurementLine);
+      await tester.tapAt(const Offset(300, 250));
+      await tester.tapAt(const Offset(500, 250));
+      if (pointCount == 3) {
+        await tester.tapAt(const Offset(500, 450));
+      }
+      await tester.tap(find.text('Finish Measure'));
+      await tester.pump();
 
-    expect(_shapeCount(tester), 1);
-    final painter = _graphOverlayPainter(tester);
-    final shapes = (painter.shapes as List).cast<GraphShape>();
-    final wallSegments = (painter.wallSegments as List).cast<WallSegment>();
-    expect(shapes.single.preset, GraphDrawingPreset.measurementLine);
-    expect(shapes.single.closed, isTrue);
-    final shapeSegments = shapes.single.segmentIndexes
-        .map((index) => wallSegments[index])
-        .toList();
-    expect(
-        shapeMeasurementSummary(shapes.single, shapeSegments), contains(' sf'));
-    expect(
-        shapeMeasurementSummary(shapes.single, shapeSegments), contains(' lf'));
-  });
+      expect(_shapeCount(tester), 1);
+      final painter = _graphOverlayPainter(tester);
+      final shapes = (painter.shapes as List).cast<GraphShape>();
+      final wallSegments = (painter.wallSegments as List).cast<WallSegment>();
+      expect(shapes.single.preset, GraphDrawingPreset.measurementLine);
+      expect(shapes.single.closed, isFalse);
+      expect(shapes.single.fillColor, isNull);
+      expect(shapes.single.fillOpacity, 0);
+      expect(wallSegments, hasLength(pointCount - 1));
+      expect(usesStyledSegmentRendering(shapes.single), isTrue);
+      final shapeSegments = shapes.single.segmentIndexes
+          .map((index) => wallSegments[index])
+          .toList();
+      expect(shapeMeasurementSummary(shapes.single, shapeSegments),
+          isNot(contains(' sf')));
+      expect(
+          shapeExportMeasurements(shapes.single, shapeSegments), hasLength(1));
+      expect(shapeMeasurementSummary(shapes.single, shapeSegments),
+          contains(' lf'));
+    });
+  }
 
   testWidgets('generic shapes require drag and double-click opens properties',
       (tester) async {
@@ -847,6 +857,90 @@ void main() {
         GraphFileKind.pngExport,
       ),
     );
+  });
+
+  testWidgets('Expired sign-in keeps the active graph and retries unchanged',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final portal = _FakeBugManPortalService()
+      ..saveError =
+          const PortalAuthenticationException('https://ops.holloman-ext.com/');
+    final repository = MemoryGraphRepository();
+    final document = GraphDocument.forJob(Job(
+      customerName: 'Auth Recovery Test',
+      serviceAddress: '1 Test Way',
+      pestPacLocationNumber: 'TEST-LOC',
+      pestPacBillToNumber: 'TEST-BILL',
+      serviceType: 'Inspection',
+      createdBy: 'Widget Test',
+      createdDate: DateTime(2026, 9, 9),
+    ));
+    document.replaceAnnotations(const [
+      GraphAnnotation(
+        id: 'photo-pin',
+        kind: GraphAnnotationKind.photo,
+        point: GraphPoint(x: 800, y: 600),
+        label: 'Photo 1',
+        attachmentIds: ['photo-1'],
+      ),
+    ]);
+    document.replaceAttachments(const [
+      GraphAttachment(
+        id: 'photo-1',
+        name: 'test.png',
+        annotationId: 'photo-pin',
+        blobKey: 'photo-1',
+        thumbnailKey: 'photo-1-thumb',
+      ),
+    ]);
+    final photo = image_lib.encodePng(image_lib.Image(width: 2, height: 2));
+    await repository
+        .saveGraph(document, blobs: {'photo-1': photo, 'photo-1-thumb': photo});
+    final openedUrls = <String>[];
+    await tester.pumpWidget(MaterialApp(
+      home: GraphCanvasScreen(
+        document: document,
+        repository: repository,
+        portalService: portal,
+        onPortalSignIn: openedUrls.add,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await _selectQuickMeasure(tester);
+    await tester.tapAt(const Offset(300, 250));
+    await tester.tapAt(const Offset(500, 250));
+    final beforeSave = document.toJson();
+
+    await chooseFileAction(tester, 'Graph File');
+    expect(find.text('Sign in to save online'), findsOneWidget);
+    expect(find.textContaining('saved on this device'), findsOneWidget);
+    expect((await repository.loadGraph(document.id))!.toJson(), beforeSave);
+    expect(document.isDirty, isTrue);
+    await tester.tap(find.text('Sign in in new tab'));
+    await tester.pumpAndSettle();
+    expect(openedUrls, ['https://ops.holloman-ext.com/']);
+    expect(find.byType(GraphCanvasScreen), findsOneWidget);
+    expect(document.toJson(), beforeSave);
+    expect(_wallCount(tester), 1);
+
+    portal.saveError = null;
+    await chooseFileAction(tester, 'Graph File');
+    expect(portal.saveCallCount, 2);
+    expect(portal.savedDocuments, [beforeSave, beforeSave]);
+    expect(portal.savedBlobKeys, [
+      {'photo-1', 'photo-1-thumb'},
+      {'photo-1', 'photo-1-thumb'},
+    ]);
+    expect(await repository.loadBlob('photo-1'), photo);
+    expect(document.isDirty, isFalse);
+    // The unclosed drawing session remains usable after the sign-in dialog.
+    await tester.tapAt(const Offset(500, 450));
+    await tester.tap(find.text('Finish Measure'));
+    await tester.pumpAndSettle();
+    expect(_wallCount(tester), 2);
+    expect(_shapeCount(tester), 1);
   });
 
   testWidgets('Export stops before upload when its automatic graph save fails',
@@ -1821,6 +1915,8 @@ class _FakePhotoPicker implements GraphPhotoPicker {
 class _FakeBugManPortalService implements BugManPortalService {
   final savedKey = 'company/BugMan Graphs Uploads/saved.bgraph';
   final saveExistingKeys = <String?>[];
+  final savedDocuments = <Map<String, Object?>>[];
+  final savedBlobKeys = <Set<String>>[];
   final uploadExportCalls = <Map<String, Object?>>[];
   // Item 11: keys in this set make the next saveGraph() call with that
   // existingKey throw the exact server 404 error text, so tests can
@@ -1844,6 +1940,8 @@ class _FakeBugManPortalService implements BugManPortalService {
     String? existingKey,
   }) async {
     saveCallCount += 1;
+    savedDocuments.add(document.toJson());
+    savedBlobKeys.add(blobs.keys.toSet());
     saveExistingKeys.add(existingKey);
     if (saveError != null) throw saveError!;
     if (existingKey != null && notFoundExistingKeys.contains(existingKey)) {
