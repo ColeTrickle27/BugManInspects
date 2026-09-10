@@ -59,6 +59,7 @@ void main() {
     final document = GraphDocument(
       id: job.id,
       customer: GraphCustomerInfo.fromJob(job),
+      traces: const [TraceGeometry(id: 'property-trace', label: 'Property', geoPoints: [], canvasPoints: [GraphPoint(x: 100, y: 100), GraphPoint(x: 200, y: 100), GraphPoint(x: 200, y: 200)])],
       annotations: const [
         GraphAnnotation(
             id: 'approved',
@@ -93,6 +94,16 @@ void main() {
     final annotations =
         _graphOverlayPainter(tester).annotations as List<dynamic>;
     expect(annotations.map((item) => item.id), ['approved']);
+    final viewer =
+        tester.widget<InteractiveViewer>(find.byType(InteractiveViewer));
+    expect(viewer.child, isA<RepaintBoundary>());
+    final dynamic surface = (viewer.child as RepaintBoundary).child;
+    expect(surface.traces.map((dynamic trace) => trace.id), ['property-trace']);
+    expect(surface.traceLayerVisible, isTrue);
+    final exportBoundary = find.byWidget(viewer.child!);
+    expect(find.descendant(of: exportBoundary, matching: find.byType(AppBar)),
+        findsNothing);
+    expect(document.isDirty, isFalse);
   });
 
   testWidgets('New Job shows optional metadata fields and approved services',

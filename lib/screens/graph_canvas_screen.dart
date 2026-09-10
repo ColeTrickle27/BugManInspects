@@ -93,6 +93,9 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
   final FocusNode _editorFocusNode = FocusNode(debugLabel: 'Graph editor');
   bool _multiTouchPanning = false;
   final GlobalKey _canvasBoundaryKey = GlobalKey(debugLabel: 'Graph export');
+  final GlobalKey _presentationBoundaryKey =
+      GlobalKey(debugLabel: 'Customer graph export');
+  void Function()? _stopPresentationExport;
   final GlobalKey _canvasViewportKey = GlobalKey(debugLabel: 'Graph viewport');
   final TransformationController _transformationController =
       TransformationController();
@@ -257,6 +260,12 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     _markerDefaultsStore =
         widget.markerDefaultsStore ?? createMarkerDefaultsStore();
     _loadPersistedMarkerDefaults();
+    if (widget.presentationMode && _portalKey != null) {
+      _stopPresentationExport = listenForPresentationExport(
+        graphKey: _portalKey!,
+        capture: _capturePresentationPng,
+      );
+    }
   }
 
   /// Merges any previously saved "Set as Default" marker styles into
@@ -310,6 +319,7 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
 
   @override
   void dispose() {
+    _stopPresentationExport?.call();
     _document.removeListener(_handleDocumentChanged);
     _document.dispose();
     _interaction.dispose();
@@ -6953,6 +6963,37 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
     );
   }
 
+  Future<Uint8List> _capturePresentationPng() async {
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !widget.presentationMode) throw StateError('Unavailable');
+    final boundary = _presentationBoundaryKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null) throw StateError('Not ready');
+    // A separate filtered document keeps internal markup out of crop bounds too.
+    final presentation = GraphDocument(
+      customer: _document.customer,
+      wallSegments: _wallSegments,
+      shapes: _shapes,
+      traces: _traces,
+      annotations: _annotations
+          .where((annotation) =>
+              annotation.kind == GraphAnnotationKind.marker &&
+              widget.presentationMarkerIds.contains(annotation.id))
+          .toList(),
+    );
+    try {
+      return await GraphImageExport.capturePng(
+          boundary,
+          ExportBoundsCalculator.forDocument(presentation,
+              canvasSize: _canvasSize,
+              treatmentVisible: false,
+              photosVisible: false,
+              traceVisible: true));
+    } finally {
+      presentation.dispose();
+    }
+  }
+
   Widget _buildPresentationView(BuildContext context) {
     final visibleAnnotations = _annotations
         .where((annotation) =>
@@ -6978,39 +7019,42 @@ class _GraphCanvasScreenState extends State<GraphCanvasScreen> {
               minScale: 0.25,
               maxScale: 10,
               boundaryMargin: const EdgeInsets.all(1200),
-              child: _CanvasSurface(
-                canvasSize: _canvasSize,
-                wallSegments: _wallSegments,
-                annotations: visibleAnnotations,
-                shapes: _shapes,
-                freehandStrokes: const <FreehandStroke>[],
-                traces: const <TraceGeometry>[],
-                draftFreehandPoints: const <GraphPoint>[],
-                previewShapeSegments: const <WallSegment>[],
-                previewShape: null,
-                hiddenSegmentIndexes: _shapeSegmentIndexSet,
-                gridVisible: false,
-                selectedSegmentIndex: null,
-                selectedAnnotationIndex: null,
-                selectedShapeIndex: null,
-                selectedFreehandIndex: null,
-                selectedTraceIndex: null,
-                hoveredSegmentIndex: null,
-                hoveredAnnotationIndex: null,
-                hoveredShapeIndex: null,
-                hoveredFreehandIndex: null,
-                hoveredTraceIndex: null,
-                activeWallStart: null,
-                previewSegment: null,
-                treatmentCalloutTip: null,
-                treatmentCalloutBox: null,
-                activeCalloutKind: null,
-                structureVisible: true,
-                shapesVisible: true,
-                inspectionsVisible: true,
-                treatmentVisible: false,
-                photosVisible: false,
-                traceLayerVisible: false,
+              child: RepaintBoundary(
+                key: _presentationBoundaryKey,
+                child: _CanvasSurface(
+                  canvasSize: _canvasSize,
+                  wallSegments: _wallSegments,
+                  annotations: visibleAnnotations,
+                  shapes: _shapes,
+                  freehandStrokes: const <FreehandStroke>[],
+                  traces: _traces,
+                  draftFreehandPoints: const <GraphPoint>[],
+                  previewShapeSegments: const <WallSegment>[],
+                  previewShape: null,
+                  hiddenSegmentIndexes: _shapeSegmentIndexSet,
+                  gridVisible: false,
+                  selectedSegmentIndex: null,
+                  selectedAnnotationIndex: null,
+                  selectedShapeIndex: null,
+                  selectedFreehandIndex: null,
+                  selectedTraceIndex: null,
+                  hoveredSegmentIndex: null,
+                  hoveredAnnotationIndex: null,
+                  hoveredShapeIndex: null,
+                  hoveredFreehandIndex: null,
+                  hoveredTraceIndex: null,
+                  activeWallStart: null,
+                  previewSegment: null,
+                  treatmentCalloutTip: null,
+                  treatmentCalloutBox: null,
+                  activeCalloutKind: null,
+                  structureVisible: true,
+                  shapesVisible: true,
+                  inspectionsVisible: true,
+                  treatmentVisible: false,
+                  photosVisible: false,
+                  traceLayerVisible: true,
+                ),
               ),
             );
           },
