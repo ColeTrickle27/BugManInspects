@@ -33,7 +33,31 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
-  <script>document.addEventListener('contextmenu', (event) => event.preventDefault());</script>
+  <script>
+    // OpsBrain is the canonical host for Graphs. Redirect legacy standalone
+    // links before Flutter downloads so both OpsBrain home cards share one
+    // cached app and authenticated tracing requests remain same-origin.
+    (() => {
+      const portalOrigin = 'https://ops.holloman-ext.com';
+      const portalPath = '/bugman-graphs/';
+      const isPortalRoute =
+          window.location.origin === portalOrigin &&
+          (window.location.pathname === '/bugman-graphs' ||
+           window.location.pathname.startsWith(portalPath));
+      const isLegacyStandaloneHost =
+          window.location.hostname === 'graphs.holloman-ext.com' ||
+          window.location.hostname === 'bugman-graphs.pages.dev';
+      if (!isPortalRoute && isLegacyStandaloneHost) {
+        const target = new URL(portalPath, portalOrigin);
+        target.search = window.location.search;
+        target.hash = window.location.hash;
+        window.location.replace(target.toString());
+        return;
+      }
+      document.addEventListener(
+          'contextmenu', (event) => event.preventDefault());
+    })();
+  </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
