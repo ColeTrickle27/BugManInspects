@@ -9,6 +9,68 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('five address suggestions fit above the map on a phone',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+        home: TraceWorkspaceScreen(
+      address: 'Main Street',
+      canvasSize: const Size(3600, 2600),
+      traceLabel: 'Test',
+      provider: _FakeTraceMapProvider(),
+      addressService: _ManySuggestionsService(),
+    )));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('finish-trace-button')), findsOneWidget);
+  });
+  testWidgets(
+      'editing during selection unlocks search and ignores old selection',
+      (tester) async {
+    final service = _DelayedSelectionService();
+    final provider = _FakeTraceMapProvider();
+    await tester.pumpWidget(MaterialApp(
+        home: TraceWorkspaceScreen(
+      address: '',
+      canvasSize: const Size(3600, 2600),
+      traceLabel: 'Test',
+      provider: provider,
+      addressService: service,
+    )));
+    await tester.pumpAndSettle();
+    final field = find.byKey(const ValueKey('trace-address-field'));
+    await tester.enterText(field, 'Old address');
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    await tester.tap(
+        find.byKey(const ValueKey('trace-address-suggestion-test-address')));
+    await tester.pump();
+    await tester.enterText(field, 'New address');
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Search'))
+            .onPressed,
+        isNotNull);
+    await tester.tap(
+        find.byKey(const ValueKey('trace-address-suggestion-test-address')));
+    await tester.pump();
+    expect(service.pending, hasLength(2));
+    service.pending[0].complete(await _FakeAddressSuggestionService().select(
+        const AddressSuggestion(id: 'old', address: 'Old', primaryText: 'Old'),
+        sessionToken: 'old'));
+    await tester.pump();
+    expect(tester.widget<TextField>(field).controller!.text, 'New address');
+    service.pending[1].complete(await _FakeAddressSuggestionService().select(
+        const AddressSuggestion(id: 'new', address: 'New', primaryText: 'New'),
+        sessionToken: 'new'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('fake-trace-map')), findsOneWidget);
+  });
   testWidgets('trace sign in preserves the address and all existing points',
       (tester) async {
     final provider = _FakeTraceMapProvider();
@@ -376,4 +438,29 @@ class _DelayedAddressSuggestionService implements AddressSuggestionService {
       ),
     ]);
   }
+}
+
+class _DelayedSelectionService extends _FakeAddressSuggestionService {
+  final pending = <Completer<AddressSelection>>[];
+  @override
+  Future<AddressSelection> select(AddressSuggestion suggestion,
+      {required String sessionToken}) {
+    final result = Completer<AddressSelection>();
+    pending.add(result);
+    return result.future;
+  }
+}
+
+class _ManySuggestionsService extends _FakeAddressSuggestionService {
+  @override
+  Future<List<AddressSuggestion>> suggest(String query,
+          {required String sessionToken}) async =>
+      [
+        for (var i = 0; i < 5; i++)
+          AddressSuggestion(
+              id: '$i',
+              address: '$i Main Street, Raleigh, NC',
+              primaryText: '$i Main Street',
+              secondaryText: 'Raleigh, NC'),
+      ];
 }

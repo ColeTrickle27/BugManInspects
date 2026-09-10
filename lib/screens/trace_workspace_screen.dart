@@ -98,6 +98,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
   void _onAddressChanged(String _) {
     _signInUrl = null;
     _selectedAddress = null;
+    _selecting = false;
     _error = null;
     _suggestions = const <AddressSuggestion>[];
     _sessionToken = _newSessionToken();
@@ -286,63 +287,71 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
-        children: [
-          _buildAddressSearch(),
-          if (_signInUrl != null)
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Wrap(
-                alignment: WrapAlignment.center,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 12,
+      body: LayoutBuilder(
+          builder: (context, constraints) => Column(
                 children: [
-                  const Text(
-                      'Sign in in a separate tab, then return and retry. Your trace stays open.'),
-                  TextButton.icon(
-                    onPressed: () => (widget.onPortalSignIn ??
-                        openPortalSignIn)(_signInUrl!),
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Sign in to OpsBrain'),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: constraints.maxHeight * 0.5,
+                    ),
+                    child: SingleChildScrollView(child: _buildAddressSearch()),
                   ),
-                ],
-              ),
-            ),
-          Expanded(child: _buildMapBody()),
-          Material(
-            elevation: 8,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Wrap(
-                      spacing: 18,
-                      runSpacing: 4,
-                      children: [
-                        Text('${_points.length} points'),
-                        Text(MeasurementFormat.linearFeet(
-                          measurement.linearFeet,
-                        )),
-                        Text(MeasurementFormat.squareFeet(
-                          measurement.squareFeet,
-                        )),
-                        Text(MeasurementFormat.acres(measurement.acres)),
-                      ],
+                  if (_signInUrl != null)
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 12,
+                        children: [
+                          const Text(
+                              'Sign in in a separate tab, then return and retry. Your trace stays open.'),
+                          TextButton.icon(
+                            onPressed: () => (widget.onPortalSignIn ??
+                                openPortalSignIn)(_signInUrl!),
+                            icon: const Icon(Icons.open_in_new),
+                            label: const Text('Sign in to OpsBrain'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Expanded(child: _buildMapBody()),
+                  Material(
+                    elevation: 8,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Wrap(
+                              spacing: 18,
+                              runSpacing: 4,
+                              children: [
+                                Text('${_points.length} points'),
+                                Text(MeasurementFormat.linearFeet(
+                                  measurement.linearFeet,
+                                )),
+                                Text(MeasurementFormat.squareFeet(
+                                  measurement.squareFeet,
+                                )),
+                                Text(
+                                    MeasurementFormat.acres(measurement.acres)),
+                              ],
+                            ),
+                          ),
+                          FilledButton.icon(
+                            key: const ValueKey('finish-trace-button'),
+                            onPressed: _points.length >= 3 ? _finish : null,
+                            icon: const Icon(Icons.check),
+                            label: Text(
+                                editingTrace ? 'Save Trace' : 'Finish Trace'),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  FilledButton.icon(
-                    key: const ValueKey('finish-trace-button'),
-                    onPressed: _points.length >= 3 ? _finish : null,
-                    icon: const Icon(Icons.check),
-                    label: Text(editingTrace ? 'Save Trace' : 'Finish Trace'),
-                  ),
                 ],
-              ),
-            ),
-          ),
-        ],
-      ),
+              )),
     );
   }
 
@@ -484,7 +493,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
       return Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 540),
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -524,6 +533,7 @@ class _TraceWorkspaceScreenState extends State<TraceWorkspaceScreen> {
         ),
         const Positioned(
           left: 12,
+          right: 64,
           top: 12,
           child: Card(
             child: Padding(

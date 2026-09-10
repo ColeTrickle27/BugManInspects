@@ -4,7 +4,7 @@
 // Keep the production editor from reusing a prior release's stable
 // main.dart.js URL. Flutter's generated service worker and the browser cache
 // can otherwise keep an older Graphs build alive for hours after deployment.
-const bugManRelease = '20260910-customer-review-2';
+const bugManRelease = '20260910-trace-repair-1';
 for (const build of _flutter.buildConfig.builds) {
   if (build.mainJsPath) {
     build.mainJsPath = `${build.mainJsPath}?release=${bugManRelease}`;
